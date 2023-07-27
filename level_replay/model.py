@@ -147,8 +147,9 @@ class Policy(nn.Module):
     def forward(self, inputs, rnn_hxs, masks):
         raise NotImplementedError
 
-    def act(self, inputs, rnn_hxs, masks, deterministic=False):
-        value, actor_features, rnn_hxs = self.base(inputs, rnn_hxs, masks)
+    def act(self, inputs, rnn_hxs, masks, level_seeds, deterministic=False):
+        value, actor_features, new_rnn_hxs = self.base(inputs, rnn_hxs, masks)
+        instance_value = self.get_instance_value(inputs, rnn_hxs, masks, level_seeds)
         dist = self.dist(actor_features)
 
         if deterministic:
@@ -160,20 +161,25 @@ class Policy(nn.Module):
         action_log_dist = dist.logits
         dist_entropy = dist.entropy().mean()
 
-        return value, action, action_log_dist, rnn_hxs
+        return value, instance_value, action, action_log_dist, new_rnn_hxs
 
     def get_value(self, inputs, rnn_hxs, masks):
         value, _, _ = self.base(inputs, rnn_hxs, masks)
         return value
 
-    def evaluate_actions(self, inputs, rnn_hxs, masks, action):
-        value, actor_features, rnn_hxs = self.base(inputs, rnn_hxs, masks)
+    def get_instance_value(self, inputs, rnn_hxs, masks, level_seeds):
+        value, _, _ = self.base(inputs, rnn_hxs, masks) #TODO: change
+        return value
+
+    def evaluate_actions(self, inputs, rnn_hxs, masks, action, level_seeds):
+        value, actor_features, new_rnn_hxs = self.base(inputs, rnn_hxs, masks)
         dist = self.dist(actor_features)
+        instance_value = self.get_instance_value(inputs, rnn_hxs, masks, level_seeds)
 
         action_log_probs = dist.log_probs(action)
         dist_entropy = dist.entropy().mean()
 
-        return value, action_log_probs, dist_entropy, rnn_hxs
+        return value, instance_value, action_log_probs, dist_entropy, new_rnn_hxs
 
 
 class NNBase(nn.Module):
@@ -492,15 +498,18 @@ class MinigridPolicy(nn.Module):
         x = x.flatten(1, -1)
         return self.critic(x)
 
-    def evaluate_actions(self, inputs, rnn_hxs, masks, action):
+    def evaluate_actions(self, inputs, rnn_hxs, masks, action, level_seeds):
         x = inputs
         x = self.image_conv(x)
+        x_i = self.instance_image_conv(inputs, level_seeds)
         x = x.flatten(1, -1)
+        x_i = x_i.flatten(1, -1)
         actor_features = self.actor_base(x)
         value = self.critic(x)
+        instance_value = self.instance_critic(x_i)
         dist = self.dist(actor_features)
 
         action_log_probs = dist.log_probs(action)
         dist_entropy = dist.entropy().mean()
 
-        return value, action_log_probs, dist_entropy, rnn_hxs
+        return value, instance_value, action_log_probs, dist_entropy, rnn_hxs

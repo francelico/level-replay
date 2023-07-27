@@ -119,11 +119,11 @@ class VecPyTorchProcgen(VecEnvWrapper):
             rvenv = rvenv.venv
         return rvenv
 
-    def reset(self):
+    def reset(self, strategy='sequential'):
         if self.level_sampler:
             seeds = torch.zeros(self.venv.num_envs, dtype=torch.int)
             for e in range(self.venv.num_envs):
-                seed = self.level_sampler.sample('sequential')
+                seed = self.level_sampler.sample(strategy)
                 seeds[e] = seed
                 self.venv.seed(seed,e)
 
@@ -153,6 +153,7 @@ class VecPyTorchProcgen(VecEnvWrapper):
             for e in done.nonzero()[0]:
                 seed = self.level_sampler.sample()
                 self.venv.seed(seed, e) # seed resets the corresponding level
+                info[e]['level_seed'] = seed
 
             # NB: This reset call propagates upwards through all VecEnvWrappers
             obs = self.raw_venv.observe()['rgb'] # Note reset does not reset game instances, but only returns latest observations
@@ -297,6 +298,7 @@ def make_lr_venv(num_envs, env_name, seeds, device, **kwargs):
         venv = VecNormalize(venv=venv, ob=False, ret=ret_normalization)
 
         if level_sampler_args:
+            assert seeds is not None
             level_sampler = LevelSampler(
                 seeds, 
                 venv.observation_space, venv.action_space,

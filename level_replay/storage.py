@@ -26,6 +26,7 @@ class RolloutStorage(object):
             num_steps + 1, num_processes, recurrent_hidden_state_size)
         self.rewards = torch.zeros(num_steps, num_processes, 1)
         self.value_preds = torch.zeros(num_steps + 1, num_processes, 1)
+        self.instance_value_preds = torch.zeros(num_steps + 1, num_processes, 1)
         self.returns = torch.zeros(num_steps + 1, num_processes, 1)
         self.action_log_probs = torch.zeros(num_steps, num_processes, 1)
         self.action_log_dist = torch.zeros(num_steps, num_processes, action_space.n)
@@ -54,6 +55,7 @@ class RolloutStorage(object):
         self.recurrent_hidden_states = self.recurrent_hidden_states.to(device)
         self.rewards = self.rewards.to(device)
         self.value_preds = self.value_preds.to(device)
+        self.instance_value_preds = self.instance_value_preds.to(device)
         self.returns = self.returns.to(device)
         self.action_log_probs = self.action_log_probs.to(device)
         self.action_log_dist = self.action_log_dist.to(device)
@@ -63,7 +65,7 @@ class RolloutStorage(object):
         self.level_seeds = self.level_seeds.to(device)
 
     def insert(self, obs, recurrent_hidden_states, actions, action_log_probs, action_log_dist,
-               value_preds, rewards, masks, bad_masks, level_seeds=None):
+               value_preds, instance_value_preds, rewards, masks, bad_masks, level_seeds=None):
         if len(rewards.shape) == 3: rewards = rewards.squeeze(2)
         self.obs[self.step + 1].copy_(obs)
         self.recurrent_hidden_states[self.step +
@@ -72,6 +74,7 @@ class RolloutStorage(object):
         self.action_log_probs[self.step].copy_(action_log_probs)
         self.action_log_dist[self.step].copy_(action_log_dist)
         self.value_preds[self.step].copy_(value_preds)
+        self.instance_value_preds[self.step].copy_(instance_value_preds)
         self.rewards[self.step].copy_(rewards)
         self.masks[self.step + 1].copy_(masks)
         self.bad_masks[self.step + 1].copy_(bad_masks)
@@ -129,17 +132,20 @@ class RolloutStorage(object):
             actions_batch = self.actions.view(-1,
                                             self.actions.size(-1))[indices]
             value_preds_batch = self.value_preds[:-1].view(-1, 1)[indices]
+            instance_value_preds_batch = self.instance_value_preds[:-1].view(-1, 1)[indices]
             return_batch = self.returns[:-1].view(-1, 1)[indices]
             masks_batch = self.masks[:-1].view(-1, 1)[indices]
             old_action_log_probs_batch = self.action_log_probs.view(-1,
                                                                     1)[indices]
+            level_seeds_batch = self.level_seeds.view(-1, 1)[indices]
             if advantages is None:
                 adv_targ = None
             else:
                 adv_targ = advantages.view(-1, 1)[indices]
 
-            yield obs_batch, recurrent_hidden_states_batch, actions_batch, \
-                value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, adv_targ
+            yield obs_batch, recurrent_hidden_states_batch, actions_batch, value_preds_batch, \
+                instance_value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, adv_targ, \
+                level_seeds_batch
 
     def recurrent_generator(self, advantages, num_mini_batch):
         num_processes = self.rewards.size(1)
@@ -154,10 +160,12 @@ class RolloutStorage(object):
             recurrent_hidden_states_batch = []
             actions_batch = []
             value_preds_batch = []
+            instance_value_preds_batch = []
             return_batch = []
             masks_batch = []
             old_action_log_probs_batch = []
             adv_targ = []
+            level_seeds_batch = []
 
             for offset in range(num_envs_per_batch):
                 ind = perm[start_ind + offset]
@@ -166,22 +174,26 @@ class RolloutStorage(object):
                     self.recurrent_hidden_states[0:1, ind])
                 actions_batch.append(self.actions[:, ind])
                 value_preds_batch.append(self.value_preds[:-1, ind])
+                instance_value_preds_batch.append(self.instance_value_preds[:-1, ind])
                 return_batch.append(self.returns[:-1, ind])
                 masks_batch.append(self.masks[:-1, ind])
                 old_action_log_probs_batch.append(
                     self.action_log_probs[:, ind])
                 adv_targ.append(advantages[:, ind])
+                level_seeds_batch.append(self.level_seeds[:, ind])
 
             T, N = self.num_steps, num_envs_per_batch
             # These are all tensors of size (T, N, -1)
             obs_batch = torch.stack(obs_batch, 1)
             actions_batch = torch.stack(actions_batch, 1)
             value_preds_batch = torch.stack(value_preds_batch, 1)
+            instance_value_preds_batch = torch.stack(instance_value_preds_batch, 1)
             return_batch = torch.stack(return_batch, 1)
             masks_batch = torch.stack(masks_batch, 1)
             old_action_log_probs_batch = torch.stack(
                 old_action_log_probs_batch, 1)
             adv_targ = torch.stack(adv_targ, 1)
+            level_seeds_batch = torch.stack(level_seeds_batch, 1)
 
             # States is just a (N, -1) tensor
             recurrent_hidden_states_batch = torch.stack(
@@ -191,11 +203,14 @@ class RolloutStorage(object):
             obs_batch = _flatten_helper(T, N, obs_batch)
             actions_batch = _flatten_helper(T, N, actions_batch)
             value_preds_batch = _flatten_helper(T, N, value_preds_batch)
+            instance_value_preds_batch = _flatten_helper(T, N, instance_value_preds_batch)
             return_batch = _flatten_helper(T, N, return_batch)
             masks_batch = _flatten_helper(T, N, masks_batch)
             old_action_log_probs_batch = _flatten_helper(T, N, \
                     old_action_log_probs_batch)
             adv_targ = _flatten_helper(T, N, adv_targ)
+            level_seeds_batch = _flatten_helper(T, N, level_seeds_batch)
 
-            yield obs_batch, recurrent_hidden_states_batch, actions_batch, \
-                value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, adv_targ
+            yield obs_batch, recurrent_hidden_states_batch, actions_batch, value_preds_batch, \
+                instance_value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, adv_targ, \
+                level_seeds_batch

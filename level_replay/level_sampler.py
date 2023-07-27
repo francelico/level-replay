@@ -64,6 +64,12 @@ class LevelSampler():
             score_function = self._average_value_l1
         elif self.strategy == 'one_step_td_error':
             score_function = self._one_step_td_error
+        elif self.strategy == 'positive_value_loss':
+            score_function = self._average_positive_value_loss
+        elif self.strategy == 'clipped_value_loss':
+            score_function = self._average_clipped_value_loss
+        elif self.strategy == 'weighted_value_loss':
+            score_function = self._average_weighted_value_loss
         else:
             raise ValueError(f'Unsupported strategy, {self.strategy}')
 
@@ -125,6 +131,41 @@ class LevelSampler():
 
         return advantages.abs().mean().item()
 
+    def _average_positive_value_loss(self, **kwargs):
+        returns = kwargs['returns']
+        value_preds = kwargs['value_preds']
+
+        clipped_advantages = (returns - value_preds).clamp(0)
+
+        return clipped_advantages.mean().item()
+
+    def _average_clipped_value_loss(self, **kwargs):
+        # outputs (returns - value_preds) if value_preds < returns < instance_value_preds, else 0
+        returns = kwargs['returns']
+        value_preds = kwargs['value_preds']
+        instance_value_preds = kwargs['instance_value_preds']
+
+        clipped_returns = torch.where(returns >= instance_value_preds, 0, returns)
+        clipped_advantages = (clipped_returns - value_preds).clamp(0)
+
+        return clipped_advantages.mean().item()
+
+    def _average_weighted_value_loss(self, **kwargs):
+        # outputs w * (returns - value_preds) if value_preds < returns < instance_value_preds, else 0
+        # where w = 1 - (returns - value_preds) / (instance_value_preds - value_preds)
+        # i.e. w linearly decays as returns approaches instance_value_preds
+        returns = kwargs['returns']
+        value_preds = kwargs['value_preds']
+        instance_value_preds = kwargs['instance_value_preds']
+
+        clipped_returns = torch.where(returns >= instance_value_preds, 0, returns)
+        clipped_advantages = (clipped_returns - value_preds).clamp(0)
+
+        value_diff = (instance_value_preds - value_preds).clamp(0)
+        weighted_advantages = torch.where(value_diff > 0, clipped_advantages * (1 - clipped_advantages / value_diff), 0)
+
+        return weighted_advantages.mean().item()
+
     def _one_step_td_error(self, **kwargs):
         rewards = kwargs['rewards']
         value_preds = kwargs['value_preds']
@@ -136,7 +177,8 @@ class LevelSampler():
 
     @property
     def requires_value_buffers(self):
-        return self.strategy in ['gae', 'value_l1', 'one_step_td_error']    
+        return self.strategy in ['gae', 'value_l1', 'one_step_td_error', 'positive_value_loss', 'clipped_value_loss',
+                                 'weighted_value_loss']
 
     def _update_with_rollouts(self, rollouts, score_function):
         level_seeds = rollouts.level_seeds
@@ -166,6 +208,7 @@ class LevelSampler():
                     score_function_kwargs['returns'] = rollouts.returns[start_t:t,actor_index]
                     score_function_kwargs['rewards'] = rollouts.rewards[start_t:t,actor_index]
                     score_function_kwargs['value_preds'] = rollouts.value_preds[start_t:t,actor_index]
+                    score_function_kwargs['instance_value_preds'] = rollouts.instance_value_preds[start_t:t,actor_index]
 
                 score = score_function(**score_function_kwargs)
                 num_steps = len(episode_logits)

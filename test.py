@@ -42,6 +42,15 @@ def evaluate(
     if level_sampler:
         start_level = level_sampler.seed_range()[0]
         num_levels = 1
+        level_sampler_args = None
+    elif seeds is None:
+        level_sampler_args = {'strategy': 'sequential'}
+        assert num_processes == 1
+        assert num_levels == 0
+        num_seeds = num_episodes
+        seeds = np.random.randint(start_level, 1e7, size=num_seeds)
+    else:
+        level_sampler_args = {'strategy': 'random'}
 
     eval_envs, level_sampler = make_lr_venv(
         num_envs=num_processes, env_name=args.env_name,
@@ -50,12 +59,14 @@ def evaluate(
         no_ret_normalization=args.no_ret_normalization,
         distribution_mode=args.distribution_mode,
         paint_vel_info=args.paint_vel_info,
-        level_sampler=level_sampler)
+        level_sampler=level_sampler,
+        level_sampler_args=level_sampler_args,)
 
     eval_episode_rewards = []
+    eval_seeds = []
 
     if level_sampler:
-        obs, _ = eval_envs.reset()
+        obs, current_seeds = eval_envs.reset(**level_sampler_args)
     else:
         obs = eval_envs.reset()
     eval_recurrent_hidden_states = torch.zeros(
@@ -64,22 +75,26 @@ def evaluate(
 
     while len(eval_episode_rewards) < num_episodes:
         with torch.no_grad():
-            _, action, _, eval_recurrent_hidden_states = actor_critic.act(
+            _, instance_value, action, _, eval_recurrent_hidden_states = actor_critic.act(
                 obs,
                 eval_recurrent_hidden_states,
                 eval_masks,
+                level_seeds=current_seeds,
                 deterministic=deterministic)
 
+        last_seeds = current_seeds.clone()
         obs, _, done, infos = eval_envs.step(action)
+        current_seeds = torch.tensor([infos[i]['level_seed'] for i in range(num_processes)]).to(device)
          
         eval_masks = torch.tensor(
             [[0.0] if done_ else [1.0] for done_ in done],
             dtype=torch.float32,
             device=device)
 
-        for info in infos:
+        for i, info in enumerate(infos):
             if 'episode' in info.keys():
                 eval_episode_rewards.append(info['episode']['r'])
+                eval_seeds.append(last_seeds[i].item())
                 if progressbar:
                     progressbar.update(1)
 
@@ -92,7 +107,7 @@ def evaluate(
             .format(len(eval_episode_rewards), \
             np.mean(eval_episode_rewards), np.median(eval_episode_rewards)))
 
-    return eval_episode_rewards
+    return eval_episode_rewards, eval_seeds
 
 
 def evaluate_saved_model(
@@ -154,7 +169,7 @@ def evaluate_saved_model(
     model.load_state_dict(checkpoint["model_state_dict"])
 
     num_processes = min(num_processes, num_episodes)
-    eval_episode_rewards = \
+    eval_episode_rewards, eval_seeds = \
         evaluate(args, model, num_episodes, 
             device=device, 
             num_processes=num_processes, 

@@ -143,8 +143,8 @@ def train(args, seeds):
             # Sample actions
             with torch.no_grad():
                 obs_id = rollouts.obs[step]
-                value, action, action_log_dist, recurrent_hidden_states = actor_critic.act(
-                    obs_id, rollouts.recurrent_hidden_states[step], rollouts.masks[step])
+                value, instance_value, action, action_log_dist, recurrent_hidden_states= actor_critic.act(
+                    obs_id, rollouts.recurrent_hidden_states[step], rollouts.masks[step], rollouts.level_seeds[step])
                 action_log_prob = action_log_dist.gather(-1, action)
 
             # Obser reward and next obs
@@ -168,7 +168,7 @@ def train(args, seeds):
             rollouts.insert(
                 obs, recurrent_hidden_states, 
                 action, action_log_prob, action_log_dist, 
-                value, reward, masks, bad_masks, level_seeds)
+                value, instance_value, reward, masks, bad_masks, level_seeds)
 
         with torch.no_grad():
             obs_id = rollouts.obs[-1]
@@ -198,10 +198,11 @@ def train(args, seeds):
 
             logging.info(f"\nUpdate {j} done, {total_num_steps} steps\n  ")
             logging.info(f"\nEvaluating on {args.num_test_seeds} test levels...\n  ")
-            eval_episode_rewards = evaluate(args, actor_critic, args.num_test_seeds, device)
+            eval_episode_rewards, eval_seeds = evaluate(args, actor_critic, args.num_test_seeds, device,
+                                            start_level=args.num_train_seeds)
 
             logging.info(f"\nEvaluating on {args.num_test_seeds} train levels...\n  ")
-            train_eval_episode_rewards = evaluate(args, actor_critic, args.num_test_seeds, device, start_level=0, num_levels=args.num_train_seeds, seeds=seeds)
+            train_eval_episode_rewards, train_eval_seeds = evaluate(args, actor_critic, args.num_test_seeds, device, start_level=0, num_levels=args.num_train_seeds, seeds=seeds)
 
             stats = { 
                 "step": total_num_steps,
@@ -223,15 +224,16 @@ def train(args, seeds):
 
             if j == num_updates - 1:
                 logging.info(f"\nLast update: Evaluating on {args.num_test_seeds} test levels...\n  ")
-                final_eval_episode_rewards = evaluate(args, actor_critic, args.final_num_test_seeds, device)
+                final_eval_episode_rewards, final_eval_seeds = evaluate(args, actor_critic, args.final_num_test_seeds, device,
+                                                                        start_level=args.num_train_seeds)
 
                 mean_final_eval_episode_rewards = np.mean(final_eval_episode_rewards)
-                median_final_eval_episide_rewards = np.median(final_eval_episode_rewards)
+                median_final_eval_episode_rewards = np.median(final_eval_episode_rewards)
                 
                 plogger.log_final_test_eval({
                     'num_test_seeds': args.final_num_test_seeds,
                     'mean_episode_return': mean_final_eval_episode_rewards,
-                    'median_episode_return': median_final_eval_episide_rewards
+                    'median_episode_return': median_final_eval_episode_rewards
                 })
 
             plogger.log(stats)

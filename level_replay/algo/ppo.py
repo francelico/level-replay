@@ -64,13 +64,13 @@ class PPO():
                     advantages, self.num_mini_batch)
 
             for sample in data_generator:
-                obs_batch, recurrent_hidden_states_batch, actions_batch, \
-                value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, \
-                        adv_targ = sample
+                obs_batch, recurrent_hidden_states_batch, actions_batch, value_preds_batch, \
+                instance_value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, \
+                        adv_targ, level_seeds = sample
                 
-                values, action_log_probs, dist_entropy, _ = self.actor_critic.evaluate_actions(
+                values, instance_values, action_log_probs, dist_entropy, _ = self.actor_critic.evaluate_actions(
                     obs_batch, recurrent_hidden_states_batch, masks_batch,
-                    actions_batch)
+                    actions_batch, level_seeds)
                     
                 ratio = torch.exp(action_log_probs -
                                   old_action_log_probs_batch)
@@ -87,8 +87,17 @@ class PPO():
                 value_loss = 0.5 * torch.max(value_losses,
                                                 value_losses_clipped).mean()
 
+                instance_value_pred_clipped = instance_value_preds_batch + \
+                    (instance_values - instance_value_preds_batch).clamp(-self.clip_param, self.clip_param)
+                instance_value_losses = (instance_values - return_batch).pow(2)
+                instance_value_losses_clipped = (
+                    instance_value_pred_clipped - return_batch).pow(2)
+                instance_value_loss = 0.5 * torch.max(instance_value_losses,
+                                                instance_value_losses_clipped).mean()
+
                 self.optimizer.zero_grad()
-                loss = (value_loss*self.value_loss_coef + action_loss - dist_entropy*self.entropy_coef)
+                loss = (value_loss*self.value_loss_coef + instance_value_loss*self.value_loss_coef +
+                        action_loss - dist_entropy*self.entropy_coef)
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.actor_critic.parameters(),
                                         self.max_grad_norm)
