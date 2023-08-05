@@ -34,8 +34,14 @@ class LevelSampler():
 
         self.unseen_seed_weights = np.array([1.]*len(seeds))
         self.seed_scores = np.array([0.]*len(seeds), dtype=np.float)
+        self.buffer_logs = dict(level_return=np.full(len(seeds), np.nan, dtype=np.float),
+                                        level_value_loss=np.full(len(seeds), np.nan, dtype=np.float),
+                                        level_instance_value_loss=np.full(len(seeds), np.nan, dtype=np.float))
         self.partial_seed_scores = np.zeros((num_actors, len(seeds)), dtype=np.float)
         self.partial_seed_steps = np.zeros((num_actors, len(seeds)), dtype=np.int64)
+        self.partial_buffer_logs = dict(level_return=np.full((num_actors, len(seeds)), np.nan, dtype=np.float),
+                                        level_value_loss=np.full((num_actors, len(seeds)), np.nan, dtype=np.float),
+                                        level_instance_value_loss=np.full((num_actors, len(seeds)), np.nan, dtype=np.float))
         self.seed_staleness = np.array([0.]*len(seeds), dtype=np.float)
 
         self.next_seed_index = 0 # Only used for sequential strategy
@@ -48,8 +54,6 @@ class LevelSampler():
         self.seed2index = {seed: i for i, seed in enumerate(seeds)}
 
     def update_with_rollouts(self, rollouts):
-        if self.strategy == 'random':
-            return
 
         # Update with a RolloutStorage object
         if self.strategy == 'policy_entropy':
@@ -70,6 +74,8 @@ class LevelSampler():
             score_function = self._average_clipped_value_loss
         elif self.strategy == 'weighted_value_loss':
             score_function = self._average_weighted_value_loss
+        elif self.strategy == 'random':
+            score_function = self._always_zero
         else:
             raise ValueError(f'Unsupported strategy, {self.strategy}')
 
@@ -82,6 +88,11 @@ class LevelSampler():
 
         old_score = self.seed_scores[seed_idx]
         self.seed_scores[seed_idx] = (1 - self.alpha)*old_score + self.alpha*score
+
+    def update_buffer_logs(self, actor_index, seed_idx, score_function_kwargs, num_steps):
+        logs = self._partial_update_buffer_logs(actor_index, seed_idx, score_function_kwargs, num_steps, done=True)
+        for k, v in logs.items():
+            self.buffer_logs[k][seed_idx] = v
 
     def _partial_update_seed_score(self, actor_index, seed_idx, score, num_steps, done=False):
         partial_score = self.partial_seed_scores[actor_index][seed_idx]
@@ -98,6 +109,39 @@ class LevelSampler():
             self.partial_seed_steps[actor_index][seed_idx] = running_num_steps
 
         return merged_score
+
+    def _partial_update_buffer_logs(self, actor_index, seed_idx, score_function_kwargs, num_steps, done=False):
+
+        merged_buffer_logs = {}
+        buffer_logs = self.compute_buffer_logs(**score_function_kwargs)
+
+        for key in buffer_logs.keys():
+            partial_buffer_logs = self.partial_buffer_logs[key][actor_index][seed_idx]
+            if np.isnan(partial_buffer_logs):
+                partial_buffer_logs = 0
+            running_num_steps = self.partial_seed_steps[actor_index][seed_idx] + num_steps
+            merged_buffer_logs[key] = partial_buffer_logs + (buffer_logs[key] - partial_buffer_logs)*num_steps/float(running_num_steps)
+
+            if done:
+                self.partial_buffer_logs[key][actor_index][seed_idx] = np.nan
+            else:
+                self.partial_buffer_logs[key][actor_index][seed_idx] = merged_buffer_logs[key]
+
+        return merged_buffer_logs
+
+    def compute_buffer_logs(self, **kwargs):
+        value_loss = kwargs['returns'] - kwargs['value_preds']
+        value_loss = value_loss.abs().mean().item()
+
+        instance_value_loss = kwargs['returns'] - kwargs['instance_value_preds']
+        instance_value_loss = instance_value_loss.abs().mean().item()
+
+        if kwargs['done']:
+            ep_returns = kwargs['rewards'].sum().item()
+        else:
+            ep_returns = np.nan
+
+        return {'level_value_loss': value_loss, 'level_instance_value_loss': instance_value_loss, 'level_return': ep_returns}
 
     def _average_entropy(self, **kwargs):
         episode_logits = kwargs['episode_logits']
@@ -166,6 +210,9 @@ class LevelSampler():
 
         return weighted_advantages.mean().item()
 
+    def _always_zero(self, **kwargs):
+        return 0
+
     def _one_step_td_error(self, **kwargs):
         rewards = kwargs['rewards']
         value_preds = kwargs['value_preds']
@@ -178,7 +225,7 @@ class LevelSampler():
     @property
     def requires_value_buffers(self):
         return self.strategy in ['gae', 'value_l1', 'one_step_td_error', 'positive_value_loss', 'clipped_value_loss',
-                                 'weighted_value_loss']
+                                 'weighted_value_loss', 'random']
 
     def _update_with_rollouts(self, rollouts, score_function):
         level_seeds = rollouts.level_seeds
@@ -203,15 +250,17 @@ class LevelSampler():
                 score_function_kwargs = {}
                 episode_logits = policy_logits[start_t:t,actor_index]
                 score_function_kwargs['episode_logits'] = torch.log_softmax(episode_logits, -1)
+                num_steps = len(episode_logits)
 
                 if self.requires_value_buffers:
                     score_function_kwargs['returns'] = rollouts.returns[start_t:t,actor_index]
                     score_function_kwargs['rewards'] = rollouts.rewards[start_t:t,actor_index]
                     score_function_kwargs['value_preds'] = rollouts.value_preds[start_t:t,actor_index]
                     score_function_kwargs['instance_value_preds'] = rollouts.instance_value_preds[start_t:t,actor_index]
+                    score_function_kwargs['done'] = True
+                    self.update_buffer_logs(actor_index, seed_idx_t, score_function_kwargs, num_steps)
 
                 score = score_function(**score_function_kwargs)
-                num_steps = len(episode_logits)
                 self.update_seed_score(actor_index, seed_idx_t, score, num_steps)
 
                 start_t = t.item()
@@ -223,14 +272,17 @@ class LevelSampler():
                 score_function_kwargs = {}
                 episode_logits = policy_logits[start_t:,actor_index]
                 score_function_kwargs['episode_logits'] = torch.log_softmax(episode_logits, -1)
+                num_steps = len(episode_logits)
 
                 if self.requires_value_buffers:
                     score_function_kwargs['returns'] = rollouts.returns[start_t:,actor_index]
                     score_function_kwargs['rewards'] = rollouts.rewards[start_t:,actor_index]
                     score_function_kwargs['value_preds'] = rollouts.value_preds[start_t:,actor_index]
+                    score_function_kwargs['instance_value_preds'] = rollouts.instance_value_preds[start_t:,actor_index]
+                    score_function_kwargs['done'] = False
+                    self._partial_update_buffer_logs(actor_index, seed_idx_t, score_function_kwargs, num_steps)
 
                 score = score_function(**score_function_kwargs)
-                num_steps = len(episode_logits)
                 self._partial_update_seed_score(actor_index, seed_idx_t, score, num_steps)
 
     def after_update(self):
@@ -241,6 +293,12 @@ class LevelSampler():
                     self.update_seed_score(actor_index, seed_idx, 0, 0)
         self.partial_seed_scores.fill(0)
         self.partial_seed_steps.fill(0)
+
+    def after_logging(self):
+        # Reset buffer log and partial buffer log
+        for key in self.partial_buffer_logs:
+            self.partial_buffer_logs[key].fill(np.nan)
+            self.buffer_logs[key].fill(np.nan)
 
     def _update_staleness(self, selected_idx):
         if self.staleness_coef > 0:
@@ -321,6 +379,15 @@ class LevelSampler():
             weights = (1 - self.staleness_coef)*weights + self.staleness_coef*staleness_weights
 
         return weights
+
+    def sample_level_returns(self):
+        return self.buffer_logs['level_return']
+
+    def sample_level_value_loss(self):
+        return self.buffer_logs['level_value_loss']
+
+    def sample_level_instance_value_loss(self):
+        return self.buffer_logs['level_instance_value_loss']
 
     def _score_transform(self, transform, temperature, scores):
         if transform == 'constant':

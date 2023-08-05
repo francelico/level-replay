@@ -118,6 +118,9 @@ class FileWriter:
             fields="{base}/fields.csv".format(base=self.basepath),
             meta="{base}/meta.json".format(base=self.basepath),
             level_weights="{base}/level_weights.csv".format(base=self.basepath),
+            level_value_loss="{base}/level_value_loss.csv".format(base=self.basepath),
+            level_instance_value_loss="{base}/level_instance_value_loss.csv".format(base=self.basepath),
+            level_returns="{base}/level_returns.csv".format(base=self.basepath),
             final_test_eval="{base}/final_test_eval.csv".format(base=self.basepath)
         )
 
@@ -171,9 +174,21 @@ class FileWriter:
         self._levelweightswriter = csv.writer(self._levelweightsfile)
         self._finaltestfile = open(self.paths["final_test_eval"], "a")
         self._finaltestwriter = csv.DictWriter(self._finaltestfile, fieldnames=self.final_test_eval_fieldnames)
+        self._levelvaluelossfile = open(self.paths["level_value_loss"], "a")
+        self._levelvaluelosswriter = csv.writer(self._levelvaluelossfile)
+        self._levelinstancevaluelossfile = open(self.paths["level_instance_value_loss"], "a")
+        self._levelinstancevaluelosswriter = csv.writer(self._levelinstancevaluelossfile)
+        self._levelreturnsfile = open(self.paths["level_returns"], "a")
+        self._levelreturnswriter = csv.writer(self._levelreturnsfile)
 
         self._levelweightsfile.write("# %s\n" % ",".join(self.seeds))
         self._levelweightsfile.flush()
+        self._levelvaluelossfile.write("# %s\n" % ",".join(self.seeds))
+        self._levelvaluelossfile.flush()
+        self._levelinstancevaluelossfile.write("# %s\n" % ",".join(self.seeds))
+        self._levelinstancevaluelossfile.flush()
+        self._levelreturnsfile.write("# %s\n" % ",".join(self.seeds))
+        self._levelreturnsfile.flush()
 
         self._finaltestwriter.writeheader()
         self._finaltestfile.flush()
@@ -209,6 +224,18 @@ class FileWriter:
     def log_level_weights(self, weights):
         self._levelweightswriter.writerow(weights)
         self._levelweightsfile.flush()
+
+    def log_level_value_loss(self, value_loss):
+        self._levelvaluelosswriter.writerow(value_loss)
+        self._levelvaluelossfile.flush()
+
+    def log_level_instance_value_loss(self, instance_value_loss):
+        self._levelinstancevaluelosswriter.writerow(instance_value_loss)
+        self._levelinstancevaluelossfile.flush()
+
+    def log_level_returns(self, returns):
+        self._levelreturnswriter.writerow(returns)
+        self._levelreturnsfile.flush()
 
     def log_final_test_eval(self, to_log):
         self._finaltestwriter.writerow(to_log)

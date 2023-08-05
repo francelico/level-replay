@@ -243,6 +243,10 @@ def train(args, seeds):
         # Log level weights
         if level_sampler and j % args.weight_log_interval == 0:
             plogger.log_level_weights(level_sampler.sample_weights())
+            plogger.log_level_returns(level_sampler.sample_level_returns())
+            plogger.log_level_value_loss(level_sampler.sample_level_value_loss())
+            plogger.log_level_instance_value_loss(level_sampler.sample_level_instance_value_loss())
+        level_sampler.after_logging() # could consider only clearing if we write logs however it may lead to stale data
 
         # Checkpoint 
         timer = timeit.default_timer
