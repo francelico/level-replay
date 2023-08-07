@@ -121,6 +121,9 @@ class FileWriter:
             level_value_loss="{base}/level_value_loss.csv".format(base=self.basepath),
             level_instance_value_loss="{base}/level_instance_value_loss.csv".format(base=self.basepath),
             level_returns="{base}/level_returns.csv".format(base=self.basepath),
+            instance_pred_entropy="{base}/instance_pred_entropy.csv".format(base=self.basepath),
+            instance_pred_accuracy="{base}/instance_pred_accuracy.csv".format(base=self.basepath),
+            instance_pred_precision="{base}/instance_pred_precision.csv".format(base=self.basepath),
             final_test_eval="{base}/final_test_eval.csv".format(base=self.basepath)
         )
 
@@ -180,6 +183,12 @@ class FileWriter:
         self._levelinstancevaluelosswriter = csv.writer(self._levelinstancevaluelossfile)
         self._levelreturnsfile = open(self.paths["level_returns"], "a")
         self._levelreturnswriter = csv.writer(self._levelreturnsfile)
+        self._instancepredentropyfile = open(self.paths["instance_pred_entropy"], "a")
+        self._instancepredentropywriter = csv.writer(self._instancepredentropyfile)
+        self._instancepredaccuracyfile = open(self.paths["instance_pred_accuracy"], "a")
+        self._instancepredaccuracywriter = csv.writer(self._instancepredaccuracyfile)
+        self._instancepredprecisionfile = open(self.paths["instance_pred_precision"], "a")
+        self._instancepredprecisionwriter = csv.writer(self._instancepredprecisionfile)
 
         self._levelweightsfile.write("# %s\n" % ",".join(self.seeds))
         self._levelweightsfile.flush()
@@ -189,6 +198,12 @@ class FileWriter:
         self._levelinstancevaluelossfile.flush()
         self._levelreturnsfile.write("# %s\n" % ",".join(self.seeds))
         self._levelreturnsfile.flush()
+        self._instancepredentropyfile.write("# %s\n" % ",".join(self.seeds))
+        self._instancepredentropyfile.flush()
+        self._instancepredaccuracyfile.write("# %s\n" % ",".join(self.seeds))
+        self._instancepredaccuracyfile.flush()
+        self._instancepredprecisionfile.write("# %s\n" % ",".join(self.seeds))
+        self._instancepredprecisionfile.flush()
 
         self._finaltestwriter.writeheader()
         self._finaltestfile.flush()
@@ -236,6 +251,18 @@ class FileWriter:
     def log_level_returns(self, returns):
         self._levelreturnswriter.writerow(returns)
         self._levelreturnsfile.flush()
+
+    def log_instance_pred_precision(self, instance_pred_precision):
+        self._instancepredprecisionwriter.writerow(instance_pred_precision)
+        self._instancepredprecisionfile.flush()
+
+    def log_instance_pred_accuracy(self, instance_pred_accuracy):
+        self._instancepredaccuracywriter.writerow(instance_pred_accuracy)
+        self._instancepredaccuracyfile.flush()
+
+    def log_instance_pred_entropy(self, instance_pred_entropy):
+        self._instancepredentropywriter.writerow(instance_pred_entropy)
+        self._instancepredentropyfile.flush()
 
     def log_final_test_eval(self, to_log):
         self._finaltestwriter.writerow(to_log)

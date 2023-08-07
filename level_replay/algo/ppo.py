@@ -29,9 +29,11 @@ class PPO():
                  lr=None,
                  eps=None,
                  max_grad_norm=None,
-                 env_name=None):
+                 env_name=None,
+                 auxiliary_head=None):
 
         self.actor_critic = actor_critic
+        self.auxiliary_head = auxiliary_head if auxiliary_head is not None else None
 
         self.clip_param = clip_param
         self.ppo_epoch = ppo_epoch
@@ -43,6 +45,8 @@ class PPO():
         self.max_grad_norm = max_grad_norm
 
         self.optimizer = optim.Adam(actor_critic.parameters(), lr=lr, eps=eps)
+        self.optimizer_aux = optim.Adam(auxiliary_head.parameters(), lr=lr, eps=eps) if auxiliary_head is not None else \
+            None
 
         self.env_name = env_name
 
@@ -54,6 +58,10 @@ class PPO():
         value_loss_epoch = 0
         action_loss_epoch = 0
         dist_entropy_epoch = 0
+        instance_pred_loss_epoch = 0
+        instance_pred_entropy_epoch = 0
+        instance_pred_accuracy_epoch = 0
+        instance_pred_precision_epoch = 0
 
         for e in range(self.ppo_epoch):
             if self.actor_critic.is_recurrent:
@@ -87,30 +95,56 @@ class PPO():
                 value_loss = 0.5 * torch.max(value_losses,
                                                 value_losses_clipped).mean()
 
-                instance_value_pred_clipped = instance_value_preds_batch + \
-                    (instance_values - instance_value_preds_batch).clamp(-self.clip_param, self.clip_param)
-                instance_value_losses = (instance_values - return_batch).pow(2)
-                instance_value_losses_clipped = (
-                    instance_value_pred_clipped - return_batch).pow(2)
-                instance_value_loss = 0.5 * torch.max(instance_value_losses,
-                                                instance_value_losses_clipped).mean()
+                # instance_value_pred_clipped = instance_value_preds_batch + \
+                #     (instance_values - instance_value_preds_batch).clamp(-self.clip_param, self.clip_param)
+                # instance_value_losses = (instance_values - return_batch).pow(2)
+                # instance_value_losses_clipped = (
+                #     instance_value_pred_clipped - return_batch).pow(2)
+                # instance_value_loss = 0.5 * torch.max(instance_value_losses,
+                #                                 instance_value_losses_clipped).mean()
 
                 self.optimizer.zero_grad()
-                loss = (value_loss*self.value_loss_coef + instance_value_loss*self.value_loss_coef +
+                # TODO: add instance_value_loss?
+                loss = (value_loss*self.value_loss_coef +
                         action_loss - dist_entropy*self.entropy_coef)
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.actor_critic.parameters(),
                                         self.max_grad_norm)
-                self.optimizer.step()  
+                self.optimizer.step()
+
+                # train auxiliary head
+                if self.auxiliary_head is not None:
+                    self.optimizer_aux.zero_grad()
+                    hidden_features = self.actor_critic.get_hidden_features(obs_batch, recurrent_hidden_states_batch,
+                                                                            masks_batch)
+                    instance_pred_dist = self.auxiliary_head(hidden_features.detach())
+                    instance_logits = instance_pred_dist.logits
+                    instance_entropy = instance_pred_dist.entropy().mean()
+                    instance_pred_accuracy = self.auxiliary_head.accuracy(instance_logits, level_seeds).mean()
+                    instance_pred_precision = self.auxiliary_head.precision(instance_logits, level_seeds).mean()
+                    instance_pred_loss = F.cross_entropy(instance_logits, level_seeds.flatten().to(torch.int64))
+                    instance_pred_loss.backward()
+                    nn.utils.clip_grad_norm_(self.auxiliary_head.parameters(),
+                                            self.max_grad_norm)
+                    self.optimizer_aux.step()
                                 
                 value_loss_epoch += value_loss.item()
                 action_loss_epoch += action_loss.item()
                 dist_entropy_epoch += dist_entropy.item()
+                if self.auxiliary_head is not None:
+                    instance_pred_loss_epoch += instance_pred_loss.item()
+                    instance_pred_entropy_epoch += instance_entropy.item()
+                    instance_pred_accuracy_epoch += instance_pred_accuracy.item()
+                    instance_pred_precision_epoch += instance_pred_precision.item()
 
         num_updates = self.ppo_epoch * self.num_mini_batch
 
         value_loss_epoch /= num_updates
         action_loss_epoch /= num_updates
         dist_entropy_epoch /= num_updates
+        instance_pred_loss_epoch /= num_updates
+        instance_pred_entropy_epoch /= num_updates
+        instance_pred_accuracy_epoch /= num_updates
 
-        return value_loss_epoch, action_loss_epoch, dist_entropy_epoch
+        return value_loss_epoch, action_loss_epoch, dist_entropy_epoch, instance_pred_loss_epoch, \
+               instance_pred_entropy_epoch, instance_pred_accuracy_epoch, instance_pred_precision_epoch

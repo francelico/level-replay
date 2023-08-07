@@ -114,6 +114,36 @@ class Conv2d_tf(nn.Conv2d):
         )
 
 
+class InstancePredictor(nn.Module):
+    """
+    Instance predictor module
+    """
+    def __init__(self, input_size, hidden_size, num_instances):
+        super(InstancePredictor, self).__init__()
+        self.relu = nn.ReLU()
+        if hidden_size == -1:
+            self.hidden_layer = None
+            hidden_size = input_size
+        else:
+            self.hidden_layer = init_relu_(nn.Linear(input_size, hidden_size))
+        self.dist = Categorical(hidden_size, num_instances)
+
+    def forward(self, x):
+        if self.hidden_layer is not None:
+            x = self.relu(self.hidden_layer(x))
+        dist = self.dist(x)
+        return dist
+
+    def accuracy(self, logits, level_seeds):
+        return (logits.argmax(-1) == level_seeds.int().squeeze(-1)).float().unsqueeze(-1)
+
+    def precision(self, logits, level_seeds):
+        prob = F.softmax(logits, dim=-1)
+        if level_seeds.ndim == 1:
+            level_seeds = level_seeds.unsqueeze(-1)
+        return prob.gather(-1, level_seeds.to(torch.int64))
+
+
 class Policy(nn.Module):
     """
     Actor-Critic module 
@@ -161,15 +191,18 @@ class Policy(nn.Module):
         action_log_dist = dist.logits
         dist_entropy = dist.entropy().mean()
 
-        return value, instance_value, action, action_log_dist, new_rnn_hxs
+        return value, instance_value, action, action_log_dist, new_rnn_hxs, actor_features
 
     def get_value(self, inputs, rnn_hxs, masks):
         value, _, _ = self.base(inputs, rnn_hxs, masks)
         return value
 
     def get_instance_value(self, inputs, rnn_hxs, masks, level_seeds):
-        value, _, _ = self.base(inputs, rnn_hxs, masks) #TODO: change
-        return value
+        return torch.zeros_like(level_seeds) #TODO
+
+    def get_hidden_features(self, inputs, rnn_hxs, masks):
+        _, actor_features, _ = self.base(inputs, rnn_hxs, masks)
+        return actor_features
 
     def evaluate_actions(self, inputs, rnn_hxs, masks, action, level_seeds):
         value, actor_features, new_rnn_hxs = self.base(inputs, rnn_hxs, masks)

@@ -223,6 +223,16 @@ parser.add_argument(
     type=float, 
     default=1.0,
     help="Staleness normalization temperature")
+parser.add_argument(
+    "--instance_predictor",
+    action='store_true',
+    default=False,
+    help='Trains an instance predictor')
+parser.add_argument(
+    "--instance_predictor_hidden_size",
+    type=int,
+    default=-1,
+    help='Instance predictor hidden layer size. If -1 the predictor will be a linear layer.')
 
 # Logging arguments
 parser.add_argument(

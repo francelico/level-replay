@@ -75,7 +75,7 @@ def evaluate(
 
     while len(eval_episode_rewards) < num_episodes:
         with torch.no_grad():
-            _, instance_value, action, _, eval_recurrent_hidden_states = actor_critic.act(
+            _, instance_value, action, _, eval_recurrent_hidden_states, actor_features = actor_critic.act(
                 obs,
                 eval_recurrent_hidden_states,
                 eval_masks,

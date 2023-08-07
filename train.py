@@ -23,7 +23,7 @@ from level_replay.file_writer import FileWriter
 from level_replay.envs import make_lr_venv
 from level_replay.arguments import parser
 from test import evaluate
-
+from level_replay.model import InstancePredictor
 
 os.environ["OMP_NUM_THREADS"] = "1"
 
@@ -91,6 +91,12 @@ def train(args, seeds):
     actor_critic = model_for_env_name(args, envs)       
     actor_critic.to(device)
 
+    if args.instance_predictor:
+        instance_predictor = InstancePredictor(actor_critic.base.output_size, args.instance_predictor_hidden_size, args.num_train_seeds)
+        instance_predictor.to(device)
+    else:
+        instance_predictor = None
+
     rollouts = RolloutStorage(args.num_steps, args.num_processes,
                                 envs.observation_space.shape, envs.action_space,
                                 actor_critic.recurrent_hidden_state_size)
@@ -120,7 +126,8 @@ def train(args, seeds):
         lr=args.lr,
         eps=args.eps,
         max_grad_norm=args.max_grad_norm,
-        env_name=args.env_name)
+        env_name=args.env_name,
+        auxiliary_head=instance_predictor)
 
     level_seeds = torch.zeros(args.num_processes)
     if level_sampler:
@@ -128,6 +135,7 @@ def train(args, seeds):
     else:
         obs = envs.reset()
     level_seeds = level_seeds.unsqueeze(-1)
+    level_seeds_gpu = level_seeds.to(device)
     rollouts.obs[0].copy_(obs)
     rollouts.to(device)
 
@@ -139,13 +147,25 @@ def train(args, seeds):
     update_start_time = timer()
     for j in range(num_updates):
         actor_critic.train()
+        if instance_predictor is not None:
+            instance_predictor.train()
         for step in range(args.num_steps):
             # Sample actions
             with torch.no_grad():
                 obs_id = rollouts.obs[step]
-                value, instance_value, action, action_log_dist, recurrent_hidden_states= actor_critic.act(
-                    obs_id, rollouts.recurrent_hidden_states[step], rollouts.masks[step], rollouts.level_seeds[step])
+                value, instance_value, action, action_log_dist, recurrent_hidden_states, actor_features = actor_critic.act(
+                    obs_id, rollouts.recurrent_hidden_states[step], rollouts.masks[step], level_seeds)
                 action_log_prob = action_log_dist.gather(-1, action)
+                if instance_predictor is not None:
+                    instance_pred_dist = instance_predictor(actor_features.detach())
+                    instance_pred_logits = instance_pred_dist.logits
+                    instance_pred_entropy_rollouts = instance_pred_dist.entropy().unsqueeze(-1)
+                    instance_pred_accuracy_rollouts = instance_predictor.accuracy(instance_pred_logits, level_seeds_gpu)
+                    instance_pred_precision_rollouts = instance_predictor.precision(instance_pred_logits, level_seeds_gpu)
+                else:
+                    instance_pred_entropy_rollouts = torch.zeros_like(value)
+                    instance_pred_accuracy_rollouts = torch.zeros_like(value)
+                    instance_pred_precision_rollouts = torch.zeros_like(value)
 
             # Obser reward and next obs
             obs, reward, done, infos = envs.step(action)
@@ -168,7 +188,8 @@ def train(args, seeds):
             rollouts.insert(
                 obs, recurrent_hidden_states, 
                 action, action_log_prob, action_log_dist, 
-                value, instance_value, reward, masks, bad_masks, level_seeds)
+                value, instance_value, reward, masks, bad_masks, level_seeds,
+                instance_pred_entropy_rollouts, instance_pred_accuracy_rollouts, instance_pred_precision_rollouts)
 
         with torch.no_grad():
             obs_id = rollouts.obs[-1]
@@ -182,7 +203,9 @@ def train(args, seeds):
         if level_sampler:
             level_sampler.update_with_rollouts(rollouts)
 
-        value_loss, action_loss, dist_entropy = agent.update(rollouts)
+        value_loss, action_loss, dist_entropy, \
+            instance_pred_loss, instance_pred_entropy, instance_pred_accuracy, instance_pred_precision = \
+            agent.update(rollouts)
         rollouts.after_update()
         if level_sampler:
             level_sampler.after_update()
@@ -202,13 +225,19 @@ def train(args, seeds):
                                             start_level=args.num_train_seeds)
 
             logging.info(f"\nEvaluating on {args.num_test_seeds} train levels...\n  ")
-            train_eval_episode_rewards, train_eval_seeds = evaluate(args, actor_critic, args.num_test_seeds, device, start_level=0, num_levels=args.num_train_seeds, seeds=seeds)
+            train_eval_episode_rewards, train_eval_seeds = evaluate(args, actor_critic, args.num_test_seeds, device,
+                                                                    start_level=0, num_levels=args.num_train_seeds,
+                                                                    seeds=seeds)
 
             stats = { 
                 "step": total_num_steps,
                 "pg_loss": action_loss,
                 "value_loss": value_loss,
                 "dist_entropy": dist_entropy,
+                "instance_pred_loss": instance_pred_loss,
+                "instance_pred_entropy": instance_pred_entropy,
+                "instance_pred_accuracy": instance_pred_accuracy,
+                "instance_pred_precision": instance_pred_precision,
                 "train:mean_episode_return": np.mean(episode_rewards),
                 "train:median_episode_return": np.median(episode_rewards),
                 "test:mean_episode_return": np.mean(eval_episode_rewards),
@@ -246,7 +275,11 @@ def train(args, seeds):
             plogger.log_level_returns(level_sampler.sample_level_returns())
             plogger.log_level_value_loss(level_sampler.sample_level_value_loss())
             plogger.log_level_instance_value_loss(level_sampler.sample_level_instance_value_loss())
-        level_sampler.after_logging() # could consider only clearing if we write logs however it may lead to stale data
+            plogger.log_instance_pred_entropy(level_sampler.sample_instance_pred_entropy())
+            plogger.log_instance_pred_accuracy(level_sampler.sample_instance_pred_accuracy())
+            plogger.log_instance_pred_precision(level_sampler.sample_instance_pred_precision())
+        # could also only clear buffers when we write logs however it may lead to stale data. this is more consistent.
+        level_sampler.after_logging()
 
         # Checkpoint 
         timer = timeit.default_timer

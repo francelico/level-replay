@@ -44,6 +44,9 @@ class RolloutStorage(object):
         self.bad_masks = torch.ones(num_steps + 1, num_processes, 1)
 
         self.level_seeds = torch.zeros(num_steps, num_processes, 1, dtype=torch.int)
+        self.instance_pred_entropy = torch.zeros(num_steps, num_processes, 1)
+        self.instance_pred_accuracy = torch.zeros(num_steps, num_processes, 1)
+        self.instance_pred_precision = torch.zeros(num_steps, num_processes, 1)
 
         self.num_steps = num_steps
         self.step = 0
@@ -63,9 +66,13 @@ class RolloutStorage(object):
         self.masks = self.masks.to(device)
         self.bad_masks = self.bad_masks.to(device)
         self.level_seeds = self.level_seeds.to(device)
+        self.instance_pred_entropy = self.instance_pred_entropy.to(device)
+        self.instance_pred_accuracy = self.instance_pred_accuracy.to(device)
+        self.instance_pred_precision = self.instance_pred_precision.to(device)
 
     def insert(self, obs, recurrent_hidden_states, actions, action_log_probs, action_log_dist,
-               value_preds, instance_value_preds, rewards, masks, bad_masks, level_seeds=None):
+               value_preds, instance_value_preds, rewards, masks, bad_masks, level_seeds,
+               instance_pred_entropy, instance_pred_accuracy, instance_pred_precision):
         if len(rewards.shape) == 3: rewards = rewards.squeeze(2)
         self.obs[self.step + 1].copy_(obs)
         self.recurrent_hidden_states[self.step +
@@ -79,8 +86,10 @@ class RolloutStorage(object):
         self.masks[self.step + 1].copy_(masks)
         self.bad_masks[self.step + 1].copy_(bad_masks)
 
-        if level_seeds is not None:
-            self.level_seeds[self.step].copy_(level_seeds)
+        self.level_seeds[self.step].copy_(level_seeds)
+        self.instance_pred_entropy[self.step].copy_(instance_pred_entropy)
+        self.instance_pred_accuracy[self.step].copy_(instance_pred_accuracy)
+        self.instance_pred_precision[self.step].copy_(instance_pred_precision)
 
         self.step = (self.step + 1) % self.num_steps
 
