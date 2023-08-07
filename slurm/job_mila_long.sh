@@ -40,7 +40,7 @@
 #SBATCH --cpus-per-task=8
 
 # Maximum time for the job to run, format: days-hours:minutes:seconds
-#SBATCH --time=7-00:00:00
+#SBATCH --time=1-00:00:00
 
 # Requeue jobs if they fail
 #SBATCH --requeue
