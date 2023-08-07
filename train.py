@@ -111,6 +111,8 @@ def train(args, seeds):
             {
                 "model_state_dict": actor_critic.state_dict(),
                 "optimizer_state_dict": agent.optimizer.state_dict(),
+                "instance_predictor_state_dict": instance_predictor.state_dict(),
+                "instance_predictor_optimizer_state_dict": agent.optimizer_aux.state_dict(),
                 "args": vars(args),
             },
             checkpointpath,
