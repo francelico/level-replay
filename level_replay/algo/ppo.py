@@ -145,6 +145,7 @@ class PPO():
         instance_pred_loss_epoch /= num_updates
         instance_pred_entropy_epoch /= num_updates
         instance_pred_accuracy_epoch /= num_updates
+        instance_pred_precision_epoch /= num_updates
 
         return value_loss_epoch, action_loss_epoch, dist_entropy_epoch, instance_pred_loss_epoch, \
                instance_pred_entropy_epoch, instance_pred_accuracy_epoch, instance_pred_precision_epoch
