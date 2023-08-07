@@ -2,7 +2,7 @@ partition=$1
 shift 1
 experiment_lists=("$@")
 
-SEEDS=(8 88)
+SEEDS=(8 88 888 8888 88888)
 batch_script=job_mila_${partition}.sh
 
 cd ~/procgen/level-replay/slurm
