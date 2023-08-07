@@ -78,7 +78,7 @@ conda activate ${CONDA_ENV_NAME}
 
 echo "Loading files on node"
 REPO_DIR=$HOME/procgen/level-replay
-OUT_DIR=REPO_DIR/results
+OUT_DIR=$REPO_DIR/results
 
 # logic:
 # args: $1 = partition, $2 = array of experiment files \ {.txt}
