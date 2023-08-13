@@ -45,6 +45,9 @@
 # Requeue jobs if they fail
 #SBATCH --requeue
 
+# Exclude nodes with known issues
+#SBATCH --exclude=cn-g026
+
 experiment=$1
 experiment_text_file="${experiment}.txt"
 experiment_no=$2
