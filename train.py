@@ -6,6 +6,7 @@
 
 import copy
 import os
+import shutil
 import sys
 import time
 from collections import deque
@@ -128,7 +129,7 @@ def train(args, seeds):
                 "seed_scores": level_sampler.seed_scores,
                 "seed_staleness": level_sampler.seed_staleness,
                 "unseen_seed_weights": level_sampler.unseen_seed_weights,
-                "next_seed_idx": level_sampler.next_seed_idx,
+                "next_seed_index": level_sampler.next_seed_index,
             }
         utils.safe_checkpoint(state_dict, checkpointpath)
 
@@ -151,7 +152,7 @@ def train(args, seeds):
         level_sampler.seed_scores = checkpoint["seed_scores"]
         level_sampler.seed_staleness = checkpoint["seed_staleness"]
         level_sampler.unseen_seed_weights = checkpoint["unseen_seed_weights"]
-        level_sampler.next_seed_idx = checkpoint["next_seed_idx"]
+        level_sampler.next_seed_index = checkpoint["next_seed_index"]
 
     agent = algo.PPO(
         actor_critic,
@@ -168,23 +169,34 @@ def train(args, seeds):
 
     # === Load checkpoint ===
     if args.checkpoint:
+        restart_count = int(os.environ.get("SLURM_RESTART_COUNT", 0))
+        if restart_count:
+            logging.info(f"This job has already been restarted {restart_count} times by SLURM.")
         # find all .tar files in the log directory
         checkpoint_filenames = []
         for file in os.listdir(os.path.expandvars(os.path.expanduser(plogger.basepath))):
             if file.endswith(".tar") and file.startswith("model_"):
                 checkpoint_filenames.append(file)
                 break
-        assert len(checkpoint_filenames) > 0, "No in progress checkpoint found. Aborting."
-        assert len(checkpoint_filenames) == 1, "More than one checkpoint found. Aborting."
-        file = checkpoint_filenames[0]
-        checkpoint_path = os.path.expandvars(os.path.expanduser(plogger.basepath + '/' + file))
-        start_at_update = int(file.split('_')[1].split('.')[0])
-        print(f'Checkpoint found at update {start_at_update}. Loading Checkpoint States\n')
-        checkpoint = torch.load(checkpoint_path, map_location=lambda storage, loc: storage)
-        load_checkpoint(checkpoint, actor_critic, agent, level_sampler)
-        logging.info(f"Resuming preempted job after {start_at_update} updates\n") # 0-indexed next update
-        logging.info(f"Clearing log files after {start_at_update} updates\n")
-        plogger.delete_after_update(start_at_update)
+        if len(checkpoint_filenames) > 0:
+            assert len(checkpoint_filenames) == 1, "More than one checkpoint found. Aborting."
+            file = checkpoint_filenames[0]
+            checkpoint_path = os.path.expandvars(os.path.expanduser(plogger.basepath + '/' + file))
+            start_at_update = int(file.split('_')[1].split('.')[0])
+            print(f'Checkpoint found at update {start_at_update}. Loading Checkpoint States\n')
+            checkpoint = torch.load(checkpoint_path, map_location=lambda storage, loc: storage)
+            load_checkpoint(checkpoint, actor_critic, agent, level_sampler)
+            logging.info(f"Resuming preempted job after {start_at_update} updates\n") # 0-indexed next update
+            logging.info(f"Clearing log files after {start_at_update} updates\n")
+            plogger.delete_after_update(start_at_update)
+        else:
+            start_at_update = 0
+            logging.info("No checkpoint found. Starting from scratch\n")
+            shutil.rmtree(plogger.basepath)
+            plogger = FileWriter(
+                xpid=args.xpid, xp_args=args.__dict__, rootdir=log_dir,
+                seeds=seeds,
+            )
     else:
         start_at_update = 0
     assert plogger.num_duplicates == 0, "Duplicate data detected within log directory. Aborting."
