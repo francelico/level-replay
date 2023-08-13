@@ -51,9 +51,9 @@ def train(args, seeds):
     )
     stdout_logger = HumanOutputFormat(sys.stdout)
 
-    checkpointpath = os.path.expandvars(
-        os.path.expanduser("%s/%s/%s" % (log_dir, args.xpid, "model.tar"))
-    )
+    if plogger.completed:
+        print("Experiment already completed ({}).".format(plogger.basepath))
+        return
 
     # Configure actor envs
     start_level = 0
@@ -103,20 +103,55 @@ def train(args, seeds):
         
     batch_size = int(args.num_processes * args.num_steps / args.num_mini_batch)
 
-    def checkpoint():
+    def save_checkpoint(update_number: int = None):
         if args.disable_checkpoint:
             return
+
+        if update_number is None:
+            filename = "model.tar"
+        else:
+            filename = f"model_{update_number}.tar"
+
+
+        checkpointpath = os.path.expandvars(
+            os.path.expanduser("%s/%s/%s" % (log_dir, args.xpid, filename))
+        )
+
         logging.info("Saving checkpoint to %s", checkpointpath)
-        torch.save(
-            {
+        state_dict = {
                 "model_state_dict": actor_critic.state_dict(),
                 "optimizer_state_dict": agent.optimizer.state_dict(),
                 "instance_predictor_state_dict": instance_predictor.state_dict(),
                 "instance_predictor_optimizer_state_dict": agent.optimizer_aux.state_dict(),
                 "args": vars(args),
-            },
-            checkpointpath,
-        )
+                "seeds": level_sampler.seeds,
+                "seed_scores": level_sampler.seed_scores,
+                "seed_staleness": level_sampler.seed_staleness,
+                "unseen_seed_weights": level_sampler.unseen_seed_weights,
+                "next_seed_idx": level_sampler.next_seed_idx,
+            }
+        utils.safe_checkpoint(state_dict, checkpointpath)
+
+        # remove old checkpoints
+        old_checkpoint_filenames = []
+        for file in os.listdir(os.path.expandvars(os.path.expanduser(plogger.basepath))):
+            if file.endswith(".tar") and file != filename:
+                old_checkpoint_filenames.append(file)
+        for file in old_checkpoint_filenames:
+            os.remove(os.path.expandvars(os.path.expanduser(plogger.basepath + '/' + file)))
+
+    def load_checkpoint(checkpoint, actor_critic, agent, level_sampler):
+        actor_critic.load_state_dict(checkpoint["model_state_dict"])
+        actor_critic.to(device)
+        agent.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        instance_predictor.load_state_dict(checkpoint["instance_predictor_state_dict"])
+        instance_predictor.to(device)
+        agent.optimizer_aux.load_state_dict(checkpoint["instance_predictor_optimizer_state_dict"])
+        level_sampler.seeds = checkpoint["seeds"]
+        level_sampler.seed_scores = checkpoint["seed_scores"]
+        level_sampler.seed_staleness = checkpoint["seed_staleness"]
+        level_sampler.unseen_seed_weights = checkpoint["unseen_seed_weights"]
+        level_sampler.next_seed_idx = checkpoint["next_seed_idx"]
 
     agent = algo.PPO(
         actor_critic,
@@ -130,6 +165,29 @@ def train(args, seeds):
         max_grad_norm=args.max_grad_norm,
         env_name=args.env_name,
         auxiliary_head=instance_predictor)
+
+    # === Load checkpoint ===
+    if args.checkpoint:
+        # find all .tar files in the log directory
+        checkpoint_filenames = []
+        for file in os.listdir(os.path.expandvars(os.path.expanduser(plogger.basepath))):
+            if file.endswith(".tar") and file.startswith("model_"):
+                checkpoint_filenames.append(file)
+                break
+        assert len(checkpoint_filenames) > 0, "No in progress checkpoint found. Aborting."
+        assert len(checkpoint_filenames) == 1, "More than one checkpoint found. Aborting."
+        file = checkpoint_filenames[0]
+        checkpoint_path = os.path.expandvars(os.path.expanduser(plogger.basepath + '/' + file))
+        start_at_update = int(file.split('_')[1].split('.')[0])
+        print(f'Checkpoint found at update {start_at_update}. Loading Checkpoint States\n')
+        checkpoint = torch.load(checkpoint_path, map_location=lambda storage, loc: storage)
+        load_checkpoint(checkpoint, actor_critic, agent, level_sampler)
+        logging.info(f"Resuming preempted job after {start_at_update} updates\n") # 0-indexed next update
+        logging.info(f"Clearing log files after {start_at_update} updates\n")
+        plogger.delete_after_update(start_at_update)
+    else:
+        start_at_update = 0
+    assert plogger.num_duplicates == 0, "Duplicate data detected within log directory. Aborting."
 
     level_seeds = torch.zeros(args.num_processes)
     if level_sampler:
@@ -147,7 +205,7 @@ def train(args, seeds):
 
     timer = timeit.default_timer
     update_start_time = timer()
-    for j in range(num_updates):
+    for j in range(start_at_update + 1, num_updates):
         actor_critic.train()
         if instance_predictor is not None:
             instance_predictor.train()
@@ -288,12 +346,14 @@ def train(args, seeds):
         if last_checkpoint_time is None:
             last_checkpoint_time = timer()
         try:
-            if j == num_updates - 1 or \
-                (args.save_interval > 0 and timer() - last_checkpoint_time > args.save_interval * 60):  # Save every 10 min.
-                checkpoint()
+            if j == num_updates - 1:
+                save_checkpoint()
+            elif args.save_interval > 0 and timer() - last_checkpoint_time > args.save_interval * 60: # Save every args.save_interval min.
+                save_checkpoint(update_number=j)
                 last_checkpoint_time = timer()
         except KeyboardInterrupt:
             return
+    plogger.close(successful=True)
 
 
 def generate_seeds(num_seeds, base_seed=0):

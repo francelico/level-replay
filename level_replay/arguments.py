@@ -258,3 +258,7 @@ parser.add_argument(
     "--disable_checkpoint", 
     action="store_true",
     help="Disable saving checkpoint.")
+parser.add_argument(
+    "--checkpoint",
+    action="store_true",
+    help="Restarts from last saved checkpoint if it exists.")

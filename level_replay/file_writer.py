@@ -12,6 +12,7 @@ import logging
 import os
 import time
 from typing import Dict
+import numpy as np
 
 
 def gather_metadata() -> Dict:
@@ -52,6 +53,20 @@ def gather_metadata() -> Dict:
     )
 
 
+def overwrite_file(path, new_lines):
+    with open(path, "w") as file:
+        if isinstance(new_lines[0], list):
+            writer = csv.writer(file)
+            writer.writerows(new_lines)
+        elif isinstance(new_lines[0], dict):
+            writer = csv.DictWriter(file, fieldnames=new_lines[0].keys())
+            writer.writeheader()
+            writer.writerows(new_lines)
+        else:
+            raise ValueError(f"Unsupported type {type(new_lines[0])} for new_lines")
+        file.flush()
+
+
 class FileWriter:
     def __init__(
         self,
@@ -60,6 +75,7 @@ class FileWriter:
         rootdir: str = "~/logs",
         symlink_to_latest: bool = True,
         seeds=None,
+        no_setup: bool = False,
     ):
         if not xpid:
             # Make unique id.
@@ -68,16 +84,7 @@ class FileWriter:
             )
         self.xpid = xpid
         self._tick = 0
-
-        # Metadata gathering.
-        if xp_args is None:
-            xp_args = {}
-        self.metadata = gather_metadata()
-        # We need to copy the args, otherwise when we close the file writer
-        # (and rewrite the args) we might have non-serializable objects (or
-        # other unwanted side-effects).
-        self.metadata["args"] = copy.deepcopy(xp_args)
-        self.metadata["xpid"] = self.xpid
+        self.no_setup = no_setup
 
         formatter = logging.Formatter("%(message)s")
         self._logger = logging.getLogger("logs/out")
@@ -92,14 +99,19 @@ class FileWriter:
 
         rootdir = os.path.expandvars(os.path.expanduser(rootdir))
         # To file handler.
-        self.basepath = os.path.join(rootdir, self.xpid)
+        if not self.no_setup:
+            self.basepath = os.path.join(rootdir, self.xpid)
+        else:
+            self.basepath = os.path.join(rootdir)
         if not os.path.exists(self.basepath):
+            if self.no_setup:
+                raise FileNotFoundError("Log directory not found in read-only mode: %s" % self.basepath)
             self._logger.info("Creating log directory: %s", self.basepath)
             os.makedirs(self.basepath, exist_ok=True)
         else:
             self._logger.info("Found log directory: %s", self.basepath)
 
-        if symlink_to_latest:
+        if symlink_to_latest and not self.no_setup:
             # Add 'latest' as symlink unless it exists and is no symlink.
             symlink = os.path.join(rootdir, "latest")
             try:
@@ -127,16 +139,8 @@ class FileWriter:
             final_test_eval="{base}/final_test_eval.csv".format(base=self.basepath)
         )
 
-        self._logger.info("Saving arguments to %s", self.paths["meta"])
-        if os.path.exists(self.paths["meta"]):
-            self._logger.warning(
-                "Path to meta file already exists. " "Not overriding meta."
-            )
-        else:
-            self._save_metadata()
-
         self._logger.info("Saving messages to %s", self.paths["msg"])
-        if os.path.exists(self.paths["msg"]):
+        if os.path.exists(self.paths["msg"]) and not self.no_setup:
             self._logger.warning(
                 "Path to message file already exists. " "New data will be appended."
             )
@@ -145,14 +149,16 @@ class FileWriter:
         fhandle.setFormatter(formatter)
         self._logger.addHandler(fhandle)
 
-        self._logger.info("Saving logs data to %s", self.paths["logs"])
-        self._logger.info("Saving logs' fields to %s", self.paths["fields"])
+        if not self.no_setup:
+            self._logger.info("Saving logs data to %s", self.paths["logs"])
+            self._logger.info("Saving logs' fields to %s", self.paths["fields"])
         self.fieldnames = ["_tick", "_time"]
         self.final_test_eval_fieldnames = ['num_test_seeds', 'mean_episode_return', 'median_episode_return']
         if os.path.exists(self.paths["logs"]):
-            self._logger.warning(
-                "Path to log file already exists. " "New data will be appended."
-            )
+            if not self.no_setup:
+                self._logger.warning(
+                    "Path to log file already exists. " "New data will be appended."
+                )
             # Override default fieldnames.
             with open(self.paths["fields"], "r") as csvfile:
                 reader = csv.reader(csvfile)
@@ -190,23 +196,74 @@ class FileWriter:
         self._instancepredprecisionfile = open(self.paths["instance_pred_precision"], "a")
         self._instancepredprecisionwriter = csv.writer(self._instancepredprecisionfile)
 
-        self._levelweightsfile.write("# %s\n" % ",".join(self.seeds))
-        self._levelweightsfile.flush()
-        self._levelvaluelossfile.write("# %s\n" % ",".join(self.seeds))
-        self._levelvaluelossfile.flush()
-        self._levelinstancevaluelossfile.write("# %s\n" % ",".join(self.seeds))
-        self._levelinstancevaluelossfile.flush()
-        self._levelreturnsfile.write("# %s\n" % ",".join(self.seeds))
-        self._levelreturnsfile.flush()
-        self._instancepredentropyfile.write("# %s\n" % ",".join(self.seeds))
-        self._instancepredentropyfile.flush()
-        self._instancepredaccuracyfile.write("# %s\n" % ",".join(self.seeds))
-        self._instancepredaccuracyfile.flush()
-        self._instancepredprecisionfile.write("# %s\n" % ",".join(self.seeds))
-        self._instancepredprecisionfile.flush()
+        if not self.no_setup:
+            self.setup(xp_args)
+        else:
+            self.metadata = json.load(open(self.paths["meta"], "r"))
+            self.xpid = self.metadata["xpid"]
 
-        self._finaltestwriter.writeheader()
-        self._finaltestfile.flush()
+    def setup(self, xp_args):
+
+        # Metadata gathering.
+        if xp_args is None:
+            xp_args = {}
+        self.metadata = gather_metadata()
+        # We need to copy the args, otherwise when we close the file writer
+        # (and rewrite the args) we might have non-serializable objects (or
+        # other unwanted side-effects).
+        self.metadata["args"] = copy.deepcopy(xp_args)
+        self.metadata["xpid"] = self.xpid
+
+        self._logger.info("Saving arguments to %s", self.paths["meta"])
+        if os.path.exists(self.paths["meta"]):
+            self._logger.warning(
+                "Path to meta file already exists. " "Will check if arguments match and if they do will overwritte."
+            )
+            with open(self.paths["meta"], "r") as f:
+                old_meta = json.load(f)
+                for arg in old_meta["args"]:
+                    if arg not in ["log_dir"]:
+                        assert old_meta["args"][arg] == self.metadata["args"][arg], (
+                            "Argument {} changed from {} to {}".format(
+                                arg, old_meta["args"][arg], self.metadata["args"][arg]
+                            )
+                        )
+                self.metadata["previous_slurm"] = []
+                if "previous_slurm" in old_meta and isinstance(old_meta["previous_slurm"], list):
+                    self.metadata["previous_slurm"].extend(old_meta["previous_slurm"])
+                if "slurm" in old_meta and old_meta["slurm"] is not None:
+                    self.metadata["previous_slurm"].append(old_meta["slurm"])
+                if "successful" in old_meta:
+                    self.metadata["successful"] = old_meta["successful"]
+
+        self._save_metadata()
+
+        # only write the header if the file is empty
+        if self._levelweightsfile.tell() == 0:
+            self._levelweightsfile.write("# %s\n" % ",".join(self.seeds))
+            self._levelweightsfile.flush()
+        if self._levelvaluelossfile.tell() == 0:
+            self._levelvaluelossfile.write("# %s\n" % ",".join(self.seeds))
+            self._levelvaluelossfile.flush()
+        if self._levelinstancevaluelossfile.tell() == 0:
+            self._levelinstancevaluelossfile.write("# %s\n" % ",".join(self.seeds))
+            self._levelinstancevaluelossfile.flush()
+        if self._levelreturnsfile.tell() == 0:
+            self._levelreturnsfile.write("# %s\n" % ",".join(self.seeds))
+            self._levelreturnsfile.flush()
+        if self._instancepredentropyfile.tell() == 0:
+            self._instancepredentropyfile.write("# %s\n" % ",".join(self.seeds))
+            self._instancepredentropyfile.flush()
+        if self._instancepredaccuracyfile.tell() == 0:
+            self._instancepredaccuracyfile.write("# %s\n" % ",".join(self.seeds))
+            self._instancepredaccuracyfile.flush()
+        if self._instancepredprecisionfile.tell() == 0:
+            self._instancepredprecisionfile.write("# %s\n" % ",".join(self.seeds))
+            self._instancepredprecisionfile.flush()
+
+        if self._finaltestfile.tell() == 0:
+            self._finaltestwriter.writeheader()
+            self._finaltestfile.flush()
 
     def log(self, to_log: Dict, tick: int = None, verbose: bool = False) -> None:
         if tick is not None:
@@ -281,3 +338,65 @@ class FileWriter:
     def _save_metadata(self) -> None:
         with open(self.paths["meta"], "w") as jsonfile:
             json.dump(self.metadata, jsonfile, indent=4, sort_keys=True)
+
+    def mark_completed(self) -> bool:
+        with open(self.paths["final_test_eval"], "r") as final_test_eval_file:
+            reader = csv.reader(final_test_eval_file)
+            lines = list(reader)
+        header = lines[0]
+        assert header == self.final_test_eval_fieldnames
+        if len(lines) > 1 and lines[-1] != header:
+            self.close(successful=True)
+            return True
+        else:
+            self.close(successful=False)
+            return False
+
+    def delete_after_update(self, num_update):
+        "Erase all logs that were written after the given update number"
+        with open(self.paths["logs"], "r+") as logfile:
+            reader = csv.DictReader(logfile)
+            lines = list(reader)
+            assert int(lines[-1]["# _tick"]) == len(lines) - 1
+            new_lines = []
+            for row in lines:
+                if int(row["# _tick"]) <= num_update:
+                    new_lines.append(row)
+                else:
+                    break
+            logfile.seek(0)
+            logfile.truncate()
+            writer = csv.DictWriter(logfile, fieldnames=lines[0].keys())
+            writer.writeheader()
+            writer.writerows(new_lines)
+
+        for path in [self.paths["level_weights"], self.paths["level_value_loss"], self.paths["level_instance_value_loss"],
+                        self.paths["level_returns"], self.paths["instance_pred_entropy"], self.paths["instance_pred_accuracy"],
+                        self.paths["instance_pred_precision"]]:
+            with open(path, "r+") as level_file:
+                reader = csv.reader(level_file)
+                lines = list(reader)
+                new_lines = lines[:num_update+2]
+                level_file.seek(0)
+                level_file.truncate()
+                writer = csv.writer(level_file)
+                writer.writerows(new_lines)
+
+        self._tick = num_update + 1
+
+    @property
+    def completed(self) -> bool:
+        return self.metadata["successful"]
+
+    @property
+    def num_duplicates(self) -> int:
+        with open(self.paths["final_test_eval"], "r") as finaltestfile:
+            reader = csv.reader(finaltestfile)
+            lines = list(reader)
+        header = lines[0]
+        num_dups = 0
+        for row in lines:
+            if row == header:
+                num_dups += 1
+        num_dups -= 1
+        return num_dups

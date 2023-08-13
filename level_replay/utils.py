@@ -111,3 +111,11 @@ class Timings:
             )
         result += "\nTotal: %.6fms" % (1000 * total)
         return result
+
+
+def safe_checkpoint(state_dict, path):
+    filename, ext = os.path.splitext(path)
+    path_tmp = f'{filename}_tmp{ext}'
+    torch.save(state_dict, path_tmp)
+
+    os.replace(path_tmp, path)
