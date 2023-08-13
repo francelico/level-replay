@@ -101,7 +101,7 @@ LOGDIR=${OUT_DIR}/${experiment}-${experiment_no}
 XPID="${experiment}-${experiment_no}-SEED-${SEED}"
 echo "Running experiment ${experiment_no} from ${experiment_text_file} with seed ${SEED} and xpid ${XPID}"
 echo "Saving logs to ${LOGDIR}"
-COMMAND="python ${REPO_DIR}/train.py `sed \"${experiment_no}q;d\" ${experiment_text_file}` --xpid ${XPID} --seed ${SEED} --log_dir ${LOGDIR}"
+COMMAND="python ${REPO_DIR}/train.py `sed \"${experiment_no}q;d\" ${experiment_text_file}` --xpid ${XPID} --seed ${SEED} --log_dir ${LOGDIR} --checkpoint"
 echo "Running provided command: ${COMMAND}"
 eval "${COMMAND}"
 echo "Command ran successfully!"
