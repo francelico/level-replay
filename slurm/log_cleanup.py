@@ -130,7 +130,7 @@ def update_checkpoint_states(results_dir):
                 num_updates = int(file.split('_')[1].split('.')[0])
             print(
                 f'{plogger.basepath}: Checkpoint found at update {num_updates}. Recovering level sampler state from logs\n')
-            seeds, seed_scores, seed_staleness, unseen_seed_weights, next_seed_idx = recover_level_sampler(plogger,
+            seeds, seed_scores, seed_staleness, unseen_seed_weights, next_seed_index = recover_level_sampler(plogger,
                                                                                                            num_updates - 1)
             print(f'Updating Checkpoint States\n')
             checkpoint = torch.load(checkpoint_path, map_location=lambda storage, loc: storage)
@@ -138,7 +138,7 @@ def update_checkpoint_states(results_dir):
             checkpoint['seed_scores'] = seed_scores
             checkpoint['seed_staleness'] = seed_staleness
             checkpoint['unseen_seed_weights'] = unseen_seed_weights
-            checkpoint['next_seed_idx'] = next_seed_idx
+            checkpoint['next_seed_index'] = next_seed_index
             torch.save(
                 checkpoint,
                 checkpoint_path,
@@ -244,14 +244,11 @@ def recover_level_sampler(plogger, num_updates):
         raise NotImplementedError
 
     if np.any(unseen_seed_weights):
-        next_seed_idx = np.where(unseen_seed_weights == 1)[0][0]
+        next_seed_index = np.where(unseen_seed_weights == 1)[0][0]
     else:
-        next_seed_idx = 0
+        next_seed_index = 0
 
-    return seeds, seed_scores, seed_staleness, unseen_seed_weights, next_seed_idx
-
-results_dir = '/home/francelico/dev/PhD/procgen/results/runs'
-slurm_dir = '/home/francelico/dev/PhD/procgen/results/slurm_logs'
+    return seeds, seed_scores, seed_staleness, unseen_seed_weights, next_seed_index
 
 sys.exit(0)
 
