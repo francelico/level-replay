@@ -357,8 +357,8 @@ class FileWriter:
         with open(self.paths["logs"], "r+") as logfile:
             reader = csv.DictReader(logfile)
             lines = list(reader)
-            assert int(lines[-1]["# _tick"]) == len(lines) - 1
             new_lines = []
+            assert int(lines[-1]["# _tick"]) >= num_update
             for row in lines:
                 if int(row["# _tick"]) <= num_update:
                     new_lines.append(row)
@@ -369,6 +369,9 @@ class FileWriter:
             writer = csv.DictWriter(logfile, fieldnames=lines[0].keys())
             writer.writeheader()
             writer.writerows(new_lines)
+
+        assert int(new_lines[-1]["# _tick"]) == len(new_lines) - 1
+        self._tick = num_update
 
         for path in [self.paths["level_weights"], self.paths["level_value_loss"], self.paths["level_instance_value_loss"],
                         self.paths["level_returns"], self.paths["instance_pred_entropy"], self.paths["instance_pred_accuracy"],
@@ -381,8 +384,6 @@ class FileWriter:
                 level_file.truncate()
                 writer = csv.writer(level_file)
                 writer.writerows(new_lines)
-
-        self._tick = num_update + 1
 
     @property
     def completed(self) -> bool:
