@@ -182,15 +182,15 @@ def train(args, seeds):
             assert len(checkpoint_filenames) == 1, "More than one checkpoint found. Aborting."
             file = checkpoint_filenames[0]
             checkpoint_path = os.path.expandvars(os.path.expanduser(plogger.basepath + '/' + file))
-            start_at_update = int(file.split('_')[1].split('.')[0]) + 1
-            print(f'Checkpoint found at update {start_at_update - 1}. Loading Checkpoint States\n')
+            start_at_update = int(file.split('_')[1].split('.')[0])
+            print(f'Checkpoint found at update {start_at_update}. Loading Checkpoint States\n')
             checkpoint = torch.load(checkpoint_path, map_location=lambda storage, loc: storage)
             load_checkpoint(checkpoint, actor_critic, agent, level_sampler)
-            logging.info(f"Resuming preempted job after {start_at_update - 1} updates\n") # 0-indexed next update
-            logging.info(f"Clearing log files after {start_at_update- 1} updates\n")
-            plogger.delete_after_update(start_at_update - 1)
+            logging.info(f"Resuming preempted job after {start_at_update} updates\n") # 0-indexed next update
+            logging.info(f"Clearing log files after {start_at_update} updates\n")
+            plogger.delete_after_update(start_at_update)
         else:
-            start_at_update = 0
+            start_at_update = -1
             logging.info("No checkpoint found. Starting from scratch\n")
             shutil.rmtree(plogger.basepath)
             plogger = FileWriter(
@@ -198,7 +198,7 @@ def train(args, seeds):
                 seeds=seeds,
             )
     else:
-        start_at_update = 0
+        start_at_update = -1
     assert plogger.num_duplicates == 0, "Duplicate data detected within log directory. Aborting."
 
     level_seeds = torch.zeros(args.num_processes)
@@ -217,7 +217,7 @@ def train(args, seeds):
 
     timer = timeit.default_timer
     update_start_time = timer()
-    for j in range(start_at_update, num_updates):
+    for j in range(start_at_update + 1, num_updates):
         actor_critic.train()
         if instance_predictor is not None:
             instance_predictor.train()

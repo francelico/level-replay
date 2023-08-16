@@ -383,7 +383,7 @@ class FileWriter:
             writer.writerows(new_lines)
 
         assert int(new_lines[-1]["# _tick"]) == len(new_lines) - 1
-        self._tick = num_update
+        self._tick = num_update + 1
 
         for path in [self.paths["level_weights"], self.paths["level_value_loss"], self.paths["level_instance_value_loss"],
                         self.paths["level_returns"], self.paths["instance_pred_entropy"], self.paths["instance_pred_accuracy"],
