@@ -82,6 +82,8 @@ class LevelSampler():
             score_function = self._average_weighted_value_loss
         elif self.strategy == 'random':
             score_function = self._always_zero
+        elif self.strategy== 'instance_pred_precision':
+            score_function = self._reverse_instance_pred_precision
         else:
             raise ValueError(f'Unsupported strategy, {self.strategy}')
 
@@ -225,6 +227,9 @@ class LevelSampler():
 
         return weighted_advantages.mean().item()
 
+    def _reverse_instance_pred_precision(self, **kwargs):
+        return 1 - kwargs['instance_pred_precision'].mean().item()
+
     def _always_zero(self, **kwargs):
         return 0
 
@@ -240,7 +245,7 @@ class LevelSampler():
     @property
     def requires_value_buffers(self):
         return self.strategy in ['gae', 'value_l1', 'one_step_td_error', 'positive_value_loss', 'clipped_value_loss',
-                                 'weighted_value_loss', 'random']
+                                 'weighted_value_loss', 'random', 'instance_pred_precision']
 
     def _update_with_rollouts(self, rollouts, score_function):
         level_seeds = rollouts.level_seeds

@@ -180,7 +180,7 @@ parser.add_argument(
     "--level_replay_strategy", 
     type=str,
     default='random',
-    choices=['off', 'random', 'sequential', 'policy_entropy', 'least_confidence', 'min_margin', 'gae', 'value_l1', 'one_step_td_error'],
+    choices=['off', 'random', 'sequential', 'policy_entropy', 'least_confidence', 'min_margin', 'gae', 'value_l1', 'one_step_td_error', 'instance_pred_precision'],
     help="Level replay scoring strategy")
 parser.add_argument(
     "--level_replay_eps", 
