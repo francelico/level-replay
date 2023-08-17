@@ -126,6 +126,7 @@ class InstancePredictor(nn.Module):
             hidden_size = input_size
         else:
             self.hidden_layer = init_relu_(nn.Linear(input_size, hidden_size))
+            self.layers.append(self.hidden_layer)
         self.dist = Categorical(hidden_size, num_instances)
 
     def forward(self, x):
@@ -142,6 +143,11 @@ class InstancePredictor(nn.Module):
         if level_seeds.ndim == 1:
             level_seeds = level_seeds.unsqueeze(-1)
         return prob.gather(-1, level_seeds.to(torch.int64))
+
+    def reset(self, num_instances):
+        self.dist = Categorical(self.dist.linear.in_features, num_instances)
+        if self.hidden_layer is not None:
+            self.hidden_layer = init_relu_(self.hidden_layer)
 
 
 class Policy(nn.Module):

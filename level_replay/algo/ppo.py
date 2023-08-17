@@ -50,7 +50,7 @@ class PPO():
 
         self.env_name = env_name
 
-    def update(self, rollouts):
+    def update(self, rollouts, reset_predictor=False):
         advantages = rollouts.returns[:-1] - rollouts.value_preds[:-1]
         advantages = (advantages - advantages.mean()) / (
             advantages.std() + 1e-5)
@@ -112,11 +112,32 @@ class PPO():
                                         self.max_grad_norm)
                 self.optimizer.step()
 
-                # train auxiliary head
-                if self.auxiliary_head is not None:
-                    self.optimizer_aux.zero_grad()
+
+        if self.auxiliary_head is not None:
+
+            # trains auxiliary head
+            if reset_predictor:
+                seed_indices = rollouts.level_seeds.flatten()
+                class_counts = torch.bincount(seed_indices)
+                class_indices = torch.nonzero(class_counts).flatten()
+                self.auxiliary_head.reset(num_instances=len(class_indices))
+                self.optimizer_aux = optim.Adam(self.auxiliary_head.parameters(), lr=self.optimizer_aux.defaults['lr'],
+                                                eps=self.optimizer_aux.defaults['eps'])
+
+            if self.actor_critic.is_recurrent:
+                data_generator_aux = rollouts.recurrent_generator(
+                    advantages, self.num_mini_batch_predictor, balanced_sampling=True)
+            else:
+                data_generator_aux = rollouts.feed_forward_generator(
+                    advantages, self.num_mini_batch_predictor, balanced_sampling=True)
+            for e in range(self.predictor_epoch):
+                for sample in data_generator_aux:
+                    obs_batch, recurrent_hidden_states_batch, _, _, _, _, masks_batch, _, _, level_seeds = sample
+                    #TODO: this is inefficient, best to store hidden features in rollouts at the last epoch.
                     hidden_features = self.actor_critic.get_hidden_features(obs_batch, recurrent_hidden_states_batch,
                                                                             masks_batch)
+
+                    self.optimizer_aux.zero_grad()
                     instance_pred_dist = self.auxiliary_head(hidden_features.detach())
                     instance_logits = instance_pred_dist.logits
                     instance_entropy = instance_pred_dist.entropy().mean()
@@ -127,15 +148,15 @@ class PPO():
                     nn.utils.clip_grad_norm_(self.auxiliary_head.parameters(),
                                             self.max_grad_norm)
                     self.optimizer_aux.step()
-                                
-                value_loss_epoch += value_loss.item()
-                action_loss_epoch += action_loss.item()
-                dist_entropy_epoch += dist_entropy.item()
-                if self.auxiliary_head is not None:
-                    instance_pred_loss_epoch += instance_pred_loss.item()
-                    instance_pred_entropy_epoch += instance_entropy.item()
-                    instance_pred_accuracy_epoch += instance_pred_accuracy.item()
-                    instance_pred_precision_epoch += instance_pred_precision.item()
+
+        value_loss_epoch += value_loss.item()
+        action_loss_epoch += action_loss.item()
+        dist_entropy_epoch += dist_entropy.item()
+        if self.auxiliary_head is not None:
+            instance_pred_loss_epoch += instance_pred_loss.item()
+            instance_pred_entropy_epoch += instance_entropy.item()
+            instance_pred_accuracy_epoch += instance_pred_accuracy.item()
+            instance_pred_precision_epoch += instance_pred_precision.item()
 
         num_updates = self.ppo_epoch * self.num_mini_batch
 

@@ -11,7 +11,7 @@
 
 import torch
 from torch.utils.data.sampler import \
-    BatchSampler, SubsetRandomSampler, SequentialSampler
+    BatchSampler, SubsetRandomSampler, SequentialSampler, WeightedRandomSampler
 
 
 def _flatten_helper(T, N, _tensor):
@@ -116,7 +116,8 @@ class RolloutStorage(object):
     def feed_forward_generator(self,
                                advantages,
                                num_mini_batch=None,
-                               mini_batch_size=None):
+                               mini_batch_size=None,
+                               balanced_sampling=False,):
         num_steps, num_processes = self.rewards.size()[0:2]
         batch_size = num_processes * num_steps
 
@@ -129,10 +130,20 @@ class RolloutStorage(object):
                           num_mini_batch))
             mini_batch_size = batch_size // num_mini_batch
 
-        sampler = BatchSampler(
-            SubsetRandomSampler(range(batch_size)),
-            mini_batch_size,
-            drop_last=True)
+        if balanced_sampling:
+            seed_indices = self.level_seeds.flatten()
+            class_counts = torch.bincount(seed_indices)
+            class_weights = 1.0 / class_counts.float()
+            weights = class_weights[seed_indices].flatten()
+            weights = weights / weights.sum()
+            sampler = BatchSampler(WeightedRandomSampler(weights, len(weights), replacement=True),
+                                   mini_batch_size,
+                                   drop_last=True)
+        else:
+            sampler = BatchSampler(
+                SubsetRandomSampler(range(batch_size)),
+                mini_batch_size,
+                drop_last=True)
      
         for indices in sampler:
             obs_batch = self.obs[:-1].view(-1, *self.obs.size()[2:])[indices]
