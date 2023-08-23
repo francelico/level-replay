@@ -13,6 +13,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from sklearn.metrics import classification_report
 
 from level_replay.distributions import Categorical
 from level_replay.utils import init
@@ -135,14 +136,15 @@ class InstancePredictor(nn.Module):
         dist = self.dist(x)
         return dist
 
-    def accuracy(self, logits, level_seeds):
-        return (logits.argmax(-1) == level_seeds.int().squeeze(-1)).float().unsqueeze(-1)
+    def correct_prediction(self, logits, labels):
+        return (logits.argmax(-1) == labels.int().squeeze(-1)).float().unsqueeze(-1)
 
-    def precision(self, logits, level_seeds):
-        prob = F.softmax(logits, dim=-1)
-        if level_seeds.ndim == 1:
-            level_seeds = level_seeds.unsqueeze(-1)
-        return prob.gather(-1, level_seeds.to(torch.int64))
+    def accuracy(self, logits, labels):
+        return self.correct_prediction(logits, labels).mean()
+
+    def classification_report(self, logits, labels):
+        return classification_report(labels.int().squeeze(-1).cpu().numpy(), logits.argmax(-1).cpu().numpy(),
+                                        output_dict=True, zero_division=0)
 
     def reset(self, num_instances):
         self.dist = Categorical(self.dist.linear.in_features, num_instances)
@@ -179,6 +181,11 @@ class Policy(nn.Module):
     def recurrent_hidden_state_size(self):
         """Size of rnn_hx."""
         return self.base.recurrent_hidden_state_size
+
+    @property
+    def actor_feature_size(self):
+        """Size of penultimate layer before actor and critic heads"""
+        return self.base.output_size
 
     def forward(self, inputs, rnn_hxs, masks):
         raise NotImplementedError

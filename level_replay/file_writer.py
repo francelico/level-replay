@@ -135,7 +135,11 @@ class FileWriter:
             level_returns="{base}/level_returns.csv".format(base=self.basepath),
             instance_pred_entropy="{base}/instance_pred_entropy.csv".format(base=self.basepath),
             instance_pred_accuracy="{base}/instance_pred_accuracy.csv".format(base=self.basepath),
+            instance_pred_log_prob="{base}/instance_pred_log_prob.csv".format(base=self.basepath),
+            instance_pred_prob="{base}/instance_pred_prob.csv".format(base=self.basepath),
             instance_pred_precision="{base}/instance_pred_precision.csv".format(base=self.basepath),
+            instance_pred_recall="{base}/instance_pred_recall.csv".format(base=self.basepath),
+            instance_pred_f1="{base}/instance_pred_f1.csv".format(base=self.basepath),
             final_test_eval="{base}/final_test_eval.csv".format(base=self.basepath)
         )
 
@@ -193,8 +197,16 @@ class FileWriter:
         self._instancepredentropywriter = csv.writer(self._instancepredentropyfile)
         self._instancepredaccuracyfile = open(self.paths["instance_pred_accuracy"], "a")
         self._instancepredaccuracywriter = csv.writer(self._instancepredaccuracyfile)
+        self._instancepredlogprobfile = open(self.paths["instance_pred_log_prob"], "a")
+        self._instancepredlogprobwriter = csv.writer(self._instancepredlogprobfile)
+        self._instancepredprobfile = open(self.paths["instance_pred_prob"], "a")
+        self._instancepredprobwriter = csv.writer(self._instancepredprobfile)
         self._instancepredprecisionfile = open(self.paths["instance_pred_precision"], "a")
         self._instancepredprecisionwriter = csv.writer(self._instancepredprecisionfile)
+        self._instancepredrecallfile = open(self.paths["instance_pred_recall"], "a")
+        self._instancepredrecallwriter = csv.writer(self._instancepredrecallfile)
+        self._instancepredf1file = open(self.paths["instance_pred_f1"], "a")
+        self._instancepredf1writer = csv.writer(self._instancepredf1file)
 
         if not self.no_setup:
             self.setup(xp_args, seeds)
@@ -269,9 +281,21 @@ class FileWriter:
         if self._instancepredaccuracyfile.tell() == 0:
             self._instancepredaccuracyfile.write("# %s\n" % ",".join(self.seeds))
             self._instancepredaccuracyfile.flush()
+        if self._instancepredlogprobfile.tell() == 0:
+            self._instancepredprecisionfile.write("# %s\n" % ",".join(self.seeds))
+            self._instancepredlogprobfile.flush()
+        if self._instancepredprobfile.tell() == 0:
+            self._instancepredprobfile.write("# %s\n" % ",".join(self.seeds))
+            self._instancepredprobfile.flush()
         if self._instancepredprecisionfile.tell() == 0:
             self._instancepredprecisionfile.write("# %s\n" % ",".join(self.seeds))
             self._instancepredprecisionfile.flush()
+        if self._instancepredrecallfile.tell() == 0:
+            self._instancepredrecallfile.write("# %s\n" % ",".join(self.seeds))
+            self._instancepredrecallfile.flush()
+        if self._instancepredf1file.tell() == 0:
+            self._instancepredf1file.write("# %s\n" % ",".join(self.seeds))
+            self._instancepredf1file.flush()
 
         if self._finaltestfile.tell() == 0:
             self._finaltestwriter.writeheader()
@@ -321,9 +345,13 @@ class FileWriter:
         self._levelreturnswriter.writerow(returns)
         self._levelreturnsfile.flush()
 
-    def log_instance_pred_precision(self, instance_pred_precision):
-        self._instancepredprecisionwriter.writerow(instance_pred_precision)
-        self._instancepredprecisionfile.flush()
+    def log_instance_pred_log_prob(self, instance_pred_log_prob):
+        self._instancepredlogprobwriter.writerow(instance_pred_log_prob)
+        self._instancepredlogprobfile.flush()
+
+    def log_instance_pred_prob(self, instance_pred_prob):
+        self._instancepredprobwriter.writerow(instance_pred_prob)
+        self._instancepredprobfile.flush()
 
     def log_instance_pred_accuracy(self, instance_pred_accuracy):
         self._instancepredaccuracywriter.writerow(instance_pred_accuracy)
@@ -332,6 +360,18 @@ class FileWriter:
     def log_instance_pred_entropy(self, instance_pred_entropy):
         self._instancepredentropywriter.writerow(instance_pred_entropy)
         self._instancepredentropyfile.flush()
+
+    def log_instance_pred_precision(self, instance_pred_precision):
+        self._instancepredprecisionwriter.writerow(instance_pred_precision)
+        self._instancepredprecisionfile.flush()
+
+    def log_instance_pred_recall(self, instance_pred_recall):
+        self._instancepredrecallwriter.writerow(instance_pred_recall)
+        self._instancepredrecallfile.flush()
+
+    def log_instance_pred_f1(self, instance_pred_f1):
+        self._instancepredf1writer.writerow(instance_pred_f1)
+        self._instancepredf1file.flush()
 
     def log_final_test_eval(self, to_log):
         self._finaltestwriter.writerow(to_log)
@@ -385,9 +425,17 @@ class FileWriter:
         assert int(new_lines[-1]["# _tick"]) == len(new_lines) - 1
         self._tick = num_update + 1
 
-        for path in [self.paths["level_weights"], self.paths["level_value_loss"], self.paths["level_instance_value_loss"],
-                        self.paths["level_returns"], self.paths["instance_pred_entropy"], self.paths["instance_pred_accuracy"],
-                        self.paths["instance_pred_precision"]]:
+        for path in [self.paths["level_weights"],
+                     self.paths["level_value_loss"],
+                     self.paths["level_instance_value_loss"],
+                     self.paths["level_returns"],
+                     self.paths["instance_pred_entropy"],
+                     self.paths["instance_pred_accuracy"],
+                     self.paths["instance_pred_log_prob"],
+                     self.paths["instance_pred_prob"],
+                     self.paths["instance_pred_precision"],
+                     self.paths["instance_pred_recall"],
+                     self.paths["instance_pred_f1"]]:
             with open(path, "r+") as level_file:
                 reader = csv.reader(level_file)
                 lines = list(reader)
@@ -482,10 +530,46 @@ class FileWriter:
         return np.array([[float(val) for val in row] for row in lines[1:]])
 
     @property
+    def instance_pred_log_prob(self) -> np.ndarray:
+        # Returns a numpy array of instance pred precision of dim [num_updates, len(self.seeds)]
+        with open(self.paths["instance_pred_log_prob"], "r") as instancepredlogprobfile:
+            reader = csv.reader(instancepredlogprobfile)
+            lines = list(reader)
+        header = lines[0]
+        return np.array([[float(val) for val in row] for row in lines[1:]])
+
+    @property
+    def instance_pred_prob(self) -> np.ndarray:
+        # Returns a numpy array of instance pred precision of dim [num_updates, len(self.seeds)]
+        with open(self.paths["instance_pred_prob"], "r") as instancepredprobfile:
+            reader = csv.reader(instancepredprobfile)
+            lines = list(reader)
+        header = lines[0]
+        return np.array([[float(val) for val in row] for row in lines[1:]])
+
+    @property
     def instance_pred_precision(self) -> np.ndarray:
         # Returns a numpy array of instance pred precision of dim [num_updates, len(self.seeds)]
         with open(self.paths["instance_pred_precision"], "r") as instancepredprecisionfile:
             reader = csv.reader(instancepredprecisionfile)
+            lines = list(reader)
+        header = lines[0]
+        return np.array([[float(val) for val in row] for row in lines[1:]])
+
+    @property
+    def instance_pred_recall(self) -> np.ndarray:
+        # Returns a numpy array of instance pred precision of dim [num_updates, len(self.seeds)]
+        with open(self.paths["instance_pred_recall"], "r") as instancepredrecallfile:
+            reader = csv.reader(instancepredrecallfile)
+            lines = list(reader)
+        header = lines[0]
+        return np.array([[float(val) for val in row] for row in lines[1:]])
+
+    @property
+    def instance_pred_f1(self) -> np.ndarray:
+        # Returns a numpy array of instance pred precision of dim [num_updates, len(self.seeds)]
+        with open(self.paths["instance_pred_f1"], "r") as instancepredf1file:
+            reader = csv.reader(instancepredf1file)
             lines = list(reader)
         header = lines[0]
         return np.array([[float(val) for val in row] for row in lines[1:]])

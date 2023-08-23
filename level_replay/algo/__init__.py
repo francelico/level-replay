@@ -5,3 +5,4 @@
 # LICENSE file in the root directory of this source tree.
 
 from .ppo import PPO
+from .instance_predictor import InstancePredictorModel

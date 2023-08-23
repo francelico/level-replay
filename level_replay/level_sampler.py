@@ -14,7 +14,9 @@ class LevelSampler():
         strategy='random', replay_schedule='fixed', score_transform='power',
         temperature=1.0, eps=0.05,
         rho=0.2, nu=0.5, alpha=1.0, 
-        staleness_coef=0, staleness_transform='power', staleness_temperature=1.0):
+        staleness_coef=0, staleness_transform='power', staleness_temperature=1.0,
+        secondary_strategy='off', secondary_strategy_coef=0.0,
+        secondary_score_transform='rank', secondary_temperature=1.0,):
         self.obs_space = obs_space
         self.action_space = action_space
         self.strategy = strategy
@@ -28,26 +30,40 @@ class LevelSampler():
         self.staleness_coef = staleness_coef
         self.staleness_transform = staleness_transform
         self.staleness_temperature = staleness_temperature
+        self.secondary_strategy = secondary_strategy if secondary_strategy != 'off' else None
+        self.secondary_strategy_coef = secondary_strategy_coef
+        self.secondary_score_transform = secondary_score_transform
+        self.secondary_temperature = secondary_temperature
 
         # Track seeds and scores as in np arrays backed by shared memory
         self._init_seed_index(seeds)
 
         self.unseen_seed_weights = np.array([1.]*len(seeds))
         self.seed_scores = np.array([0.]*len(seeds), dtype=np.float)
+        self.seed_secondary_scores = np.array([0.]*len(seeds), dtype=np.float)
         self.buffer_logs = dict(level_return=np.full(len(seeds), np.nan, dtype=np.float),
                                 level_value_loss=np.full(len(seeds), np.nan, dtype=np.float),
                                 level_instance_value_loss=np.full(len(seeds), np.nan, dtype=np.float),
                                 instance_pred_entropy=np.full(len(seeds), np.nan, dtype=np.float),
                                 instance_pred_accuracy=np.full(len(seeds), np.nan, dtype=np.float),
-                                instance_pred_precision=np.full(len(seeds), np.nan, dtype=np.float))
+                                instance_pred_log_prob=np.full(len(seeds), np.nan, dtype=np.float),
+                                instance_pred_prob=np.full(len(seeds), np.nan, dtype=np.float),
+                                instance_pred_precision=np.full(len(seeds), np.nan, dtype=np.float),
+                                instance_pred_recall=np.full(len(seeds), np.nan, dtype=np.float),
+                                instance_pred_f1=np.full(len(seeds), np.nan, dtype=np.float))
         self.partial_seed_scores = np.zeros((num_actors, len(seeds)), dtype=np.float)
+        self.partial_seed_secondary_scores = np.zeros((num_actors, len(seeds)), dtype=np.float)
         self.partial_seed_steps = np.zeros((num_actors, len(seeds)), dtype=np.int64)
         self.partial_buffer_logs = dict(level_return=np.full((num_actors, len(seeds)), np.nan, dtype=np.float),
                                         level_value_loss=np.full((num_actors, len(seeds)), np.nan, dtype=np.float),
                                         level_instance_value_loss=np.full((num_actors, len(seeds)), np.nan, dtype=np.float),
                                         instance_pred_entropy=np.full((num_actors, len(seeds)), np.nan, dtype=np.float),
                                         instance_pred_accuracy=np.full((num_actors, len(seeds)), np.nan, dtype=np.float),
-                                        instance_pred_precision=np.full((num_actors, len(seeds)), np.nan, dtype=np.float))
+                                        instance_pred_log_prob=np.full((num_actors, len(seeds)), np.nan, dtype=np.float),
+                                        instance_pred_prob=np.full((num_actors, len(seeds)), np.nan, dtype=np.float),
+                                        instance_pred_precision=np.full((num_actors, len(seeds)), np.nan, dtype=np.float),
+                                        instance_pred_recall=np.full((num_actors, len(seeds)), np.nan, dtype=np.float),
+                                        instance_pred_f1=np.full((num_actors, len(seeds)), np.nan, dtype=np.float))
         self.seed_staleness = np.array([0.]*len(seeds), dtype=np.float)
 
         self.next_seed_index = 0 # Only used for sequential strategy
@@ -59,64 +75,85 @@ class LevelSampler():
         self.seeds = np.array(seeds, dtype=np.int64)
         self.seed2index = {seed: i for i, seed in enumerate(seeds)}
 
-    def update_with_rollouts(self, rollouts):
+    def update_with_rollouts(self, rollouts, instance_prediction_stats=None):
 
-        # Update with a RolloutStorage object
-        if self.strategy == 'policy_entropy':
-            score_function = self._average_entropy
-        elif self.strategy == 'least_confidence':
-            score_function = self._average_least_confidence
-        elif self.strategy == 'min_margin':
-            score_function = self._average_min_margin
-        elif self.strategy == 'gae':
-            score_function = self._average_gae
-        elif self.strategy == 'value_l1':
-            score_function = self._average_value_l1
-        elif self.strategy == 'one_step_td_error':
-            score_function = self._one_step_td_error
-        elif self.strategy == 'positive_value_loss':
-            score_function = self._average_positive_value_loss
-        elif self.strategy == 'clipped_value_loss':
-            score_function = self._average_clipped_value_loss
-        elif self.strategy == 'weighted_value_loss':
-            score_function = self._average_weighted_value_loss
-        elif self.strategy == 'random':
-            score_function = self._always_zero
-        elif self.strategy== 'instance_pred_precision':
-            score_function = self._reverse_instance_pred_precision
-        else:
-            raise ValueError(f'Unsupported strategy, {self.strategy}')
+        score_functions = []
+        for strategy in [self.strategy, self.secondary_strategy]:
+            if strategy is not None:
+                # Update with a RolloutStorage object
+                if strategy == 'policy_entropy':
+                    score_function = self._average_entropy
+                elif strategy == 'least_confidence':
+                    score_function = self._average_least_confidence
+                elif strategy == 'min_margin':
+                    score_function = self._average_min_margin
+                elif strategy == 'gae':
+                    score_function = self._average_gae
+                elif strategy == 'value_l1':
+                    score_function = self._average_value_l1
+                elif strategy == 'one_step_td_error':
+                    score_function = self._one_step_td_error
+                elif strategy == 'positive_value_loss':
+                    score_function = self._average_positive_value_loss
+                elif strategy == 'clipped_value_loss':
+                    score_function = self._average_clipped_value_loss
+                elif strategy == 'weighted_value_loss':
+                    score_function = self._average_weighted_value_loss
+                elif strategy == 'random':
+                    score_function = self._always_zero
+                elif strategy== 'instance_pred_log_prob':
+                    score_function = self._neg_sum_instance_pred_log_prob
+                else:
+                    raise ValueError(f'Unsupported strategy, {strategy}')
+                score_functions.append(score_function)
+            else:
+                score_functions.append(None)
 
-        self._update_with_rollouts(rollouts, score_function)
+        self._update_with_rollouts(rollouts, score_functions[0], instance_prediction_stats=instance_prediction_stats,
+                                   secondary_score_function=score_functions[1])
 
-    def update_seed_score(self, actor_index, seed_idx, score, num_steps):
-        score = self._partial_update_seed_score(actor_index, seed_idx, score, num_steps, done=True)
+    def update_seed_scores(self, actor_index, seed_idx, score, num_steps, secondary_score=None):
+        score, secondary_score = self._partial_update_seed_scores(actor_index, seed_idx, score, num_steps, secondary_score, done=True)
 
         self.unseen_seed_weights[seed_idx] = 0. # No longer unseen
 
         old_score = self.seed_scores[seed_idx]
         self.seed_scores[seed_idx] = (1 - self.alpha)*old_score + self.alpha*score
 
+        if secondary_score is not None:
+            old_secondary_score = self.seed_secondary_scores[seed_idx]
+            self.seed_secondary_scores[seed_idx] = (1 - self.alpha)*old_secondary_score + self.alpha*secondary_score
+
     def update_buffer_logs(self, actor_index, seed_idx, score_function_kwargs, num_steps):
         logs = self._partial_update_buffer_logs(actor_index, seed_idx, score_function_kwargs, num_steps, done=True)
         for k, v in logs.items():
             self.buffer_logs[k][seed_idx] = v
 
-    def _partial_update_seed_score(self, actor_index, seed_idx, score, num_steps, done=False):
+    def _partial_update_seed_scores(self, actor_index, seed_idx, score, num_steps, secondary_scores=None, done=False):
         partial_score = self.partial_seed_scores[actor_index][seed_idx]
         partial_num_steps = self.partial_seed_steps[actor_index][seed_idx]
 
         running_num_steps = partial_num_steps + num_steps
         merged_score = partial_score + (score - partial_score)*num_steps/float(running_num_steps)
 
+        if secondary_scores is not None:
+            partial_secondary_score = self.partial_seed_secondary_scores[actor_index][seed_idx]
+            merged_secondary_score = partial_secondary_score + \
+                                     (secondary_scores - partial_secondary_score)*num_steps/float(running_num_steps)
+        else:
+            merged_secondary_score = None
+
         if done:
             self.partial_seed_scores[actor_index][seed_idx] = 0. # zero partial score, partial num_steps
             self.partial_seed_steps[actor_index][seed_idx] = 0
+            self.partial_seed_secondary_scores[actor_index][seed_idx] = 0.
         else:
             self.partial_seed_scores[actor_index][seed_idx] = merged_score
             self.partial_seed_steps[actor_index][seed_idx] = running_num_steps
+            if merged_secondary_score is not None:
+                self.partial_seed_secondary_scores[actor_index][seed_idx] = merged_secondary_score
 
-        return merged_score
+        return merged_score, merged_secondary_score
 
     def _partial_update_buffer_logs(self, actor_index, seed_idx, score_function_kwargs, num_steps, done=False):
 
@@ -151,14 +188,20 @@ class LevelSampler():
 
         instance_pred_entropy = kwargs['instance_pred_entropy'].mean().item()
         instance_pred_accuracy = kwargs['instance_pred_accuracy'].mean().item()
-        instance_pred_precision = kwargs['instance_pred_precision'].mean().item()
+        instance_pred_log_prob = kwargs['instance_pred_log_prob'].sum().item()
+        instance_pred_prob = kwargs['instance_pred_log_prob'].exp().mean().item()
 
         return {'level_value_loss': value_loss,
                 'level_instance_value_loss': instance_value_loss,
                 'level_return': ep_returns,
-                'instance_pred_precision': instance_pred_precision,
+                'instance_pred_log_prob': instance_pred_log_prob,
+                'instance_pred_prob': instance_pred_prob,
                 'instance_pred_accuracy': instance_pred_accuracy,
-                'instance_pred_entropy': instance_pred_entropy}
+                'instance_pred_entropy': instance_pred_entropy,
+                'instance_pred_precision': kwargs['precision'],
+                'instance_pred_recall': kwargs['recall'],
+                'instance_pred_f1': kwargs['f1-score'],
+                }
 
     def _average_entropy(self, **kwargs):
         episode_logits = kwargs['episode_logits']
@@ -227,8 +270,8 @@ class LevelSampler():
 
         return weighted_advantages.mean().item()
 
-    def _reverse_instance_pred_precision(self, **kwargs):
-        return 1 - kwargs['instance_pred_precision'].mean().item()
+    def _neg_sum_instance_pred_log_prob(self, **kwargs):
+        return - kwargs['instance_pred_log_prob'].sum().item()
 
     def _always_zero(self, **kwargs):
         return 0
@@ -245,9 +288,10 @@ class LevelSampler():
     @property
     def requires_value_buffers(self):
         return self.strategy in ['gae', 'value_l1', 'one_step_td_error', 'positive_value_loss', 'clipped_value_loss',
-                                 'weighted_value_loss', 'random', 'instance_pred_precision']
+                                 'weighted_value_loss', 'random', 'instance_pred_log_prob']
 
-    def _update_with_rollouts(self, rollouts, score_function):
+    def _update_with_rollouts(self, rollouts, score_function, instance_prediction_stats=None,
+                              secondary_score_function=None):
         level_seeds = rollouts.level_seeds
         policy_logits = rollouts.action_log_dist
         done = ~(rollouts.masks > 0)
@@ -277,14 +321,22 @@ class LevelSampler():
                     score_function_kwargs['rewards'] = rollouts.rewards[start_t:t,actor_index]
                     score_function_kwargs['value_preds'] = rollouts.value_preds[start_t:t,actor_index]
                     score_function_kwargs['instance_value_preds'] = rollouts.instance_value_preds[start_t:t,actor_index]
-                    score_function_kwargs['instance_pred_precision'] = rollouts.instance_pred_precision[start_t:t,actor_index]
+                    score_function_kwargs['instance_pred_log_prob'] = rollouts.instance_pred_log_prob[start_t:t,actor_index]
                     score_function_kwargs['instance_pred_accuracy'] = rollouts.instance_pred_accuracy[start_t:t,actor_index]
                     score_function_kwargs['instance_pred_entropy'] = rollouts.instance_pred_entropy[start_t:t,actor_index]
                     score_function_kwargs['done'] = True
+                    if instance_prediction_stats is not None:
+                        stats = instance_prediction_stats['classification_report'][str(seed_idx_t)]
+                        for key in stats:
+                            score_function_kwargs[key] = stats[key]
                     self.update_buffer_logs(actor_index, seed_idx_t, score_function_kwargs, num_steps)
 
                 score = score_function(**score_function_kwargs)
-                self.update_seed_score(actor_index, seed_idx_t, score, num_steps)
+                if secondary_score_function is not None:
+                    secondary_score = secondary_score_function(**score_function_kwargs)
+                else:
+                    secondary_score = None
+                self.update_seed_scores(actor_index, seed_idx_t, score, num_steps, secondary_score)
 
                 start_t = t.item()
 
@@ -302,23 +354,32 @@ class LevelSampler():
                     score_function_kwargs['rewards'] = rollouts.rewards[start_t:,actor_index]
                     score_function_kwargs['value_preds'] = rollouts.value_preds[start_t:,actor_index]
                     score_function_kwargs['instance_value_preds'] = rollouts.instance_value_preds[start_t:,actor_index]
-                    score_function_kwargs['instance_pred_precision'] = rollouts.instance_pred_precision[start_t:,actor_index]
+                    score_function_kwargs['instance_pred_log_prob'] = rollouts.instance_pred_log_prob[start_t:,actor_index]
                     score_function_kwargs['instance_pred_accuracy'] = rollouts.instance_pred_accuracy[start_t:,actor_index]
                     score_function_kwargs['instance_pred_entropy'] = rollouts.instance_pred_entropy[start_t:,actor_index]
                     score_function_kwargs['done'] = False
+                    if instance_prediction_stats is not None:
+                        stats = instance_prediction_stats['classification_report'][str(seed_idx_t)]
+                        for key in stats:
+                            score_function_kwargs[key] = stats[key]
                     self._partial_update_buffer_logs(actor_index, seed_idx_t, score_function_kwargs, num_steps)
 
                 score = score_function(**score_function_kwargs)
-                self._partial_update_seed_score(actor_index, seed_idx_t, score, num_steps)
+                if secondary_score_function is not None:
+                    secondary_score = secondary_score_function(**score_function_kwargs)
+                else:
+                    secondary_score = None
+                self._partial_update_seed_scores(actor_index, seed_idx_t, score, num_steps, secondary_score)
 
     def after_update(self):
         # Reset partial updates, since weights have changed, and thus logits are now stale
         for actor_index in range(self.partial_seed_scores.shape[0]):
             for seed_idx in range(self.partial_seed_scores.shape[1]):
                 if self.partial_seed_scores[actor_index][seed_idx] != 0:
-                    self.update_seed_score(actor_index, seed_idx, 0, 0)
+                    self.update_seed_scores(actor_index, seed_idx, 0, 0, 0)
         self.partial_seed_scores.fill(0)
         self.partial_seed_steps.fill(0)
+        self.partial_seed_secondary_scores.fill(0)
 
     def after_logging(self):
         # Reset buffer log and partial buffer log
@@ -394,6 +455,15 @@ class LevelSampler():
         if z > 0:
             weights /= z
 
+        if self.secondary_strategy is not None:
+            secondary_weights = self._score_transform(self.secondary_score_transform, self.secondary_temperature,
+                                                      self.seed_secondary_scores)
+            secondary_weights = secondary_weights * (1-self.unseen_seed_weights)
+            z = np.sum(secondary_weights)
+            if z > 0:
+                secondary_weights /= z
+            weights = (1 - self.secondary_strategy_coef)*weights + self.secondary_strategy_coef*secondary_weights
+
         staleness_weights = 0
         if self.staleness_coef > 0:
             staleness_weights = self._score_transform(self.staleness_transform, self.staleness_temperature, self.seed_staleness)
@@ -415,14 +485,26 @@ class LevelSampler():
     def sample_level_instance_value_loss(self):
         return self.buffer_logs['level_instance_value_loss']
 
-    def sample_instance_pred_precision(self):
-        return self.buffer_logs['instance_pred_precision']
+    def sample_instance_pred_log_prob(self):
+        return self.buffer_logs['instance_pred_log_prob']
+
+    def sample_instance_pred_prob(self):
+        return self.buffer_logs['instance_pred_prob']
 
     def sample_instance_pred_accuracy(self):
         return self.buffer_logs['instance_pred_accuracy']
 
     def sample_instance_pred_entropy(self):
         return self.buffer_logs['instance_pred_entropy']
+
+    def sample_instance_pred_precision(self):
+        return self.buffer_logs['instance_pred_precision']
+
+    def sample_instance_pred_recall(self):
+        return self.buffer_logs['instance_pred_recall']
+
+    def sample_instance_pred_f1(self):
+        return self.buffer_logs['instance_pred_f1']
 
     def _score_transform(self, transform, temperature, scores):
         if transform == 'constant':

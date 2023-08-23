@@ -15,11 +15,53 @@ import torch
 
 parser = argparse.ArgumentParser(description='RL')
 
+# Instance predictor Arguments
+parser.add_argument(
+    '--max_grad_norm_instance_predictor',
+    type=float,
+    default=0.5,
+    help='max norm of gradients)')
+parser.add_argument(
+    '--num_train_eval_processes',
+    type=int,
+    default=8,
+    help='how many eval CPU processes to use')
+parser.add_argument(
+    '--num_train_eval_episodes',
+    type=int,
+    default=10,
+    help='how many evaluation episodes to complete')
+parser.add_argument(
+    '--num_train_eval_steps',
+    type=int,
+    default=2048,
+    help='number of forward steps in each rollout process')
+parser.add_argument(
+    '--lr_instance_predictor',
+    type=float,
+    default=1e-3,
+    help='learning rate for instance predictor')
+parser.add_argument(
+    '--eps_instance_predictor',
+    type=float,
+    default=1e-5,
+    help='RMSprop optimizer epsilon')
+parser.add_argument(
+    '--instance_predictor_epoch',
+    type=int,
+    default=3,
+    help='number of epochs for instance predictor')
+parser.add_argument(
+    '--num_mini_batch_instance_predictor',
+    type=int,
+    default=8,
+    help='number of batches for instance predictor')
+
 # PPO Arguments. 
 parser.add_argument(
-    '--lr', 
-    type=float, 
-    default=5e-4, 
+    '--lr',
+    type=float,
+    default=5e-4,
     help='learning rate')
 parser.add_argument(
     '--eps',
@@ -74,7 +116,7 @@ parser.add_argument(
     '--num_steps',
     type=int,
     default=256,
-    help='number of forward steps in A2C')
+    help='number of forward steps in each rollout process')
 parser.add_argument(
     '--ppo_epoch',
     type=int,
@@ -180,8 +222,41 @@ parser.add_argument(
     "--level_replay_strategy", 
     type=str,
     default='random',
-    choices=['off', 'random', 'sequential', 'policy_entropy', 'least_confidence', 'min_margin', 'gae', 'value_l1', 'one_step_td_error', 'instance_pred_precision'],
+    choices=['off', 'random', 'sequential', 'policy_entropy', 'least_confidence', 'min_margin', 'gae', 'value_l1', 'one_step_td_error', 'instance_pred_log_prob'],
     help="Level replay scoring strategy")
+# Level Replay arguments.
+parser.add_argument(
+    "--level_replay_secondary_score_transform",
+    type=str,
+    default='rank',
+    choices=['constant', 'max', 'eps_greedy', 'rank', 'power', 'softmax'],
+    help="Level replay scoring strategy")
+parser.add_argument(
+    "--level_replay_secondary_temperature",
+    type=float,
+    default=1.0,
+    help="Level replay scoring strategy")
+parser.add_argument(
+    "--level_replay_secondary_strategy",
+    type=str,
+    default='off',
+    choices=['off', 'random', 'sequential', 'policy_entropy', 'least_confidence', 'min_margin', 'gae', 'value_l1', 'one_step_td_error', 'instance_pred_log_prob'],
+    help="Level replay scoring strategy")
+parser.add_argument(
+    "--level_replay_secondary_strategy_coef_start",
+    type=float,
+    default=0.0,
+    help="Level replay coefficient balancing primary and secondary strategies, start value")
+parser.add_argument(
+    "--level_replay_secondary_strategy_coef_end",
+    type=float,
+    default=0.0,
+    help="Level replay coefficient balancing primary and secondary strategies, end value")
+parser.add_argument(
+    "--level_replay_secondary_strategy_coef_update_fraction",
+    type=float,
+    default=1.0,
+    help="Level replay coefficient balancing primary and secondary strategies, when to reach end value")
 parser.add_argument(
     "--level_replay_eps", 
     type=float,

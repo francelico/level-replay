@@ -20,10 +20,11 @@ def _flatten_helper(T, N, _tensor):
 
 class RolloutStorage(object):
     def __init__(self, num_steps, num_processes, obs_shape, action_space,
-                 recurrent_hidden_state_size, split_ratio=0.05):
+                 recurrent_hidden_state_size, actor_feature_size, split_ratio=0.05):
         self.obs = torch.zeros(num_steps + 1, num_processes, *obs_shape)
         self.recurrent_hidden_states = torch.zeros(
             num_steps + 1, num_processes, recurrent_hidden_state_size)
+        self.actor_features = torch.zeros(num_steps + 1, num_processes, actor_feature_size)
         self.rewards = torch.zeros(num_steps, num_processes, 1)
         self.value_preds = torch.zeros(num_steps + 1, num_processes, 1)
         self.instance_value_preds = torch.zeros(num_steps + 1, num_processes, 1)
@@ -46,16 +47,18 @@ class RolloutStorage(object):
         self.level_seeds = torch.zeros(num_steps, num_processes, 1, dtype=torch.int)
         self.instance_pred_entropy = torch.zeros(num_steps, num_processes, 1)
         self.instance_pred_accuracy = torch.zeros(num_steps, num_processes, 1)
-        self.instance_pred_precision = torch.zeros(num_steps, num_processes, 1)
+        self.instance_pred_log_prob = torch.zeros(num_steps, num_processes, 1)
 
         self.num_steps = num_steps
         self.step = 0
+        self.device = None
         
         self.split_ratio = split_ratio
 
     def to(self, device):
         self.obs = self.obs.to(device)
         self.recurrent_hidden_states = self.recurrent_hidden_states.to(device)
+        self.actor_features = self.actor_features.to(device)
         self.rewards = self.rewards.to(device)
         self.value_preds = self.value_preds.to(device)
         self.instance_value_preds = self.instance_value_preds.to(device)
@@ -68,15 +71,16 @@ class RolloutStorage(object):
         self.level_seeds = self.level_seeds.to(device)
         self.instance_pred_entropy = self.instance_pred_entropy.to(device)
         self.instance_pred_accuracy = self.instance_pred_accuracy.to(device)
-        self.instance_pred_precision = self.instance_pred_precision.to(device)
+        self.instance_pred_log_prob = self.instance_pred_log_prob.to(device)
+        self.device = device
 
-    def insert(self, obs, recurrent_hidden_states, actions, action_log_probs, action_log_dist,
-               value_preds, instance_value_preds, rewards, masks, bad_masks, level_seeds,
-               instance_pred_entropy, instance_pred_accuracy, instance_pred_precision):
+    def insert(self, obs, recurrent_hidden_states, actor_features, actions, action_log_probs, action_log_dist,
+               value_preds, instance_value_preds, rewards, masks, bad_masks, level_seeds):
         if len(rewards.shape) == 3: rewards = rewards.squeeze(2)
         self.obs[self.step + 1].copy_(obs)
         self.recurrent_hidden_states[self.step +
                                      1].copy_(recurrent_hidden_states)
+        self.actor_features[self.step + 1].copy_(actor_features)
         self.actions[self.step].copy_(actions)
         self.action_log_probs[self.step].copy_(action_log_probs)
         self.action_log_dist[self.step].copy_(action_log_dist)
@@ -87,17 +91,42 @@ class RolloutStorage(object):
         self.bad_masks[self.step + 1].copy_(bad_masks)
 
         self.level_seeds[self.step].copy_(level_seeds)
-        self.instance_pred_entropy[self.step].copy_(instance_pred_entropy)
-        self.instance_pred_accuracy[self.step].copy_(instance_pred_accuracy)
-        self.instance_pred_precision[self.step].copy_(instance_pred_precision)
 
         self.step = (self.step + 1) % self.num_steps
+
+    def insert_instance_pred(self, instance_pred_entropy, instance_pred_accuracy, instance_pred_log_prob):
+        self.instance_pred_entropy.copy_(instance_pred_entropy)
+        self.instance_pred_accuracy.copy_(instance_pred_accuracy)
+        self.instance_pred_log_prob.copy_(instance_pred_log_prob)
 
     def after_update(self):
         self.obs[0].copy_(self.obs[-1])
         self.recurrent_hidden_states[0].copy_(self.recurrent_hidden_states[-1])
+        self.actor_features[0].copy_(self.actor_features[-1])
         self.masks[0].copy_(self.masks[-1])
         self.bad_masks[0].copy_(self.bad_masks[-1])
+        self.level_seeds[0].copy_(self.level_seeds[-1])
+
+    def reset(self, obs=None):
+        self.obs = torch.zeros_like(self.obs)
+        if obs is not None:
+            self.obs[0].copy_(obs)
+        self.recurrent_hidden_states = torch.zeros_like(self.recurrent_hidden_states)
+        self.actor_features = torch.zeros_like(self.actor_features)
+        self.rewards = torch.zeros_like(self.rewards)
+        self.value_preds = torch.zeros_like(self.value_preds)
+        self.instance_value_preds = torch.zeros_like(self.instance_value_preds)
+        self.returns = torch.zeros_like(self.returns)
+        self.action_log_probs = torch.zeros_like(self.action_log_probs)
+        self.action_log_dist = torch.zeros_like(self.action_log_dist)
+        self.actions = torch.zeros_like(self.actions)
+        self.masks = torch.ones_like(self.masks)
+        self.bad_masks = torch.ones_like(self.bad_masks)
+        self.level_seeds = torch.zeros_like(self.level_seeds)
+        self.instance_pred_entropy = torch.zeros_like(self.instance_pred_entropy)
+        self.instance_pred_accuracy = torch.zeros_like(self.instance_pred_accuracy)
+        self.instance_pred_log_prob = torch.zeros_like(self.instance_pred_log_prob)
+        self.step = 0
 
     def compute_returns(self,
                         next_value,
@@ -149,6 +178,8 @@ class RolloutStorage(object):
             obs_batch = self.obs[:-1].view(-1, *self.obs.size()[2:])[indices]
             recurrent_hidden_states_batch = self.recurrent_hidden_states[:-1].view(
                 -1, self.recurrent_hidden_states.size(-1))[indices]
+            actor_features_batch = self.actor_features[:-1].view(
+                -1, self.actor_features.size(-1))[indices]
             actions_batch = self.actions.view(-1,
                                             self.actions.size(-1))[indices]
             value_preds_batch = self.value_preds[:-1].view(-1, 1)[indices]
@@ -163,7 +194,7 @@ class RolloutStorage(object):
             else:
                 adv_targ = advantages.view(-1, 1)[indices]
 
-            yield obs_batch, recurrent_hidden_states_batch, actions_batch, value_preds_batch, \
+            yield obs_batch, recurrent_hidden_states_batch, actor_features_batch, actions_batch, value_preds_batch, \
                 instance_value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, adv_targ, \
                 level_seeds_batch
 
@@ -178,6 +209,7 @@ class RolloutStorage(object):
         for start_ind in range(0, num_processes, num_envs_per_batch):
             obs_batch = []
             recurrent_hidden_states_batch = []
+            actor_features_batch = []
             actions_batch = []
             value_preds_batch = []
             instance_value_preds_batch = []
@@ -192,6 +224,7 @@ class RolloutStorage(object):
                 obs_batch.append(self.obs[:-1, ind])
                 recurrent_hidden_states_batch.append(
                     self.recurrent_hidden_states[0:1, ind])
+                actor_features_batch.append(self.actor_features[:-1, ind])
                 actions_batch.append(self.actions[:, ind])
                 value_preds_batch.append(self.value_preds[:-1, ind])
                 instance_value_preds_batch.append(self.instance_value_preds[:-1, ind])
@@ -205,6 +238,7 @@ class RolloutStorage(object):
             T, N = self.num_steps, num_envs_per_batch
             # These are all tensors of size (T, N, -1)
             obs_batch = torch.stack(obs_batch, 1)
+            actor_features_batch = torch.stack(actor_features_batch, 1)
             actions_batch = torch.stack(actions_batch, 1)
             value_preds_batch = torch.stack(value_preds_batch, 1)
             instance_value_preds_batch = torch.stack(instance_value_preds_batch, 1)
@@ -221,6 +255,7 @@ class RolloutStorage(object):
 
             # Flatten the (T, N, ...) tensors to (T * N, ...)
             obs_batch = _flatten_helper(T, N, obs_batch)
+            actor_features_batch = _flatten_helper(T, N, actor_features_batch)
             actions_batch = _flatten_helper(T, N, actions_batch)
             value_preds_batch = _flatten_helper(T, N, value_preds_batch)
             instance_value_preds_batch = _flatten_helper(T, N, instance_value_preds_batch)
@@ -231,6 +266,6 @@ class RolloutStorage(object):
             adv_targ = _flatten_helper(T, N, adv_targ)
             level_seeds_batch = _flatten_helper(T, N, level_seeds_batch)
 
-            yield obs_batch, recurrent_hidden_states_batch, actions_batch, value_preds_batch, \
+            yield obs_batch, recurrent_hidden_states_batch, actor_features_batch, actions_batch, value_preds_batch, \
                 instance_value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, adv_targ, \
                 level_seeds_batch

@@ -9,7 +9,7 @@ import os
 import shutil
 import sys
 import time
-from collections import deque
+from collections import deque, defaultdict
 import timeit
 import logging
 
@@ -62,6 +62,7 @@ def train(args, seeds):
         num_levels = 0
         level_sampler_args = None
         seeds = None
+        eval_level_sampler_args = None
     else:
         num_levels = 1
         level_sampler_args = dict(
@@ -76,7 +77,15 @@ def train(args, seeds):
             alpha=args.level_replay_alpha,
             staleness_coef=args.staleness_coef,
             staleness_transform=args.staleness_transform,
-            staleness_temperature=args.staleness_temperature
+            staleness_temperature=args.staleness_temperature,
+            secondary_strategy=args.level_replay_secondary_strategy,
+            secondary_strategy_coef=args.level_replay_secondary_strategy_coef_start,
+            secondary_score_transform=args.level_replay_secondary_score_transform,
+            secondary_temperature=args.level_replay_secondary_temperature,
+        )
+        eval_level_sampler_args = dict(
+            num_actors=args.num_train_eval_processes,
+            strategy="random",
         )
     envs, level_sampler = make_lr_venv(
         num_envs=args.num_processes, env_name=args.env_name,
@@ -86,6 +95,15 @@ def train(args, seeds):
         distribution_mode=args.distribution_mode,
         paint_vel_info=args.paint_vel_info,
         level_sampler_args=level_sampler_args)
+
+    eval_envs, eval_level_sampler = make_lr_venv(
+        num_envs=args.num_train_eval_processes, env_name=args.env_name,
+        seeds=seeds, device=device,
+        num_levels=num_levels, start_level=start_level,
+        no_ret_normalization=args.no_ret_normalization,
+        distribution_mode=args.distribution_mode,
+        paint_vel_info=args.paint_vel_info,
+        level_sampler_args=eval_level_sampler_args)
     
     is_minigrid = args.env_name.startswith('MiniGrid')
 
@@ -100,9 +118,17 @@ def train(args, seeds):
 
     rollouts = RolloutStorage(args.num_steps, args.num_processes,
                                 envs.observation_space.shape, envs.action_space,
-                                actor_critic.recurrent_hidden_state_size)
-        
+                                actor_critic.recurrent_hidden_state_size,
+                                actor_critic.actor_feature_size)
+    rollouts.to(device)
+    eval_rollouts = RolloutStorage(args.num_train_eval_steps, args.num_train_eval_processes,
+                                   envs.observation_space.shape, envs.action_space,
+                                   actor_critic.recurrent_hidden_state_size,
+                                   actor_critic.actor_feature_size)
+    eval_rollouts.to(device)
     batch_size = int(args.num_processes * args.num_steps / args.num_mini_batch)
+    eval_batch_size = int(args.num_train_eval_processes * args.num_train_eval_steps /
+                          args.num_mini_batch_instance_predictor)
 
     def save_checkpoint(update_number: int = None):
         if args.disable_checkpoint:
@@ -123,7 +149,7 @@ def train(args, seeds):
                 "model_state_dict": actor_critic.state_dict(),
                 "optimizer_state_dict": agent.optimizer.state_dict(),
                 "instance_predictor_state_dict": instance_predictor.state_dict(),
-                "instance_predictor_optimizer_state_dict": agent.optimizer_aux.state_dict(),
+                "instance_predictor_optimizer_state_dict": instance_predictor_model.optimizer.state_dict(),
                 "args": vars(args),
                 "seeds": level_sampler.seeds,
                 "seed_scores": level_sampler.seed_scores,
@@ -141,13 +167,13 @@ def train(args, seeds):
         for file in old_checkpoint_filenames:
             os.remove(os.path.expandvars(os.path.expanduser(plogger.basepath + '/' + file)))
 
-    def load_checkpoint(checkpoint, actor_critic, agent, level_sampler):
-        actor_critic.load_state_dict(checkpoint["model_state_dict"])
-        actor_critic.to(device)
+    def load_checkpoint(checkpoint, agent, level_sampler, instance_predictor_model):
+        agent.actor_critic.load_state_dict(checkpoint["model_state_dict"])
+        agent.actor_critic.to(device)
         agent.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        instance_predictor.load_state_dict(checkpoint["instance_predictor_state_dict"])
-        instance_predictor.to(device)
-        agent.optimizer_aux.load_state_dict(checkpoint["instance_predictor_optimizer_state_dict"])
+        instance_predictor_model.instance_predictor.load_state_dict(checkpoint["instance_predictor_state_dict"])
+        instance_predictor_model.instance_predictor.to(device)
+        instance_predictor_model.optimizer.load_state_dict(checkpoint["instance_predictor_optimizer_state_dict"])
         level_sampler.seeds = checkpoint["seeds"]
         level_sampler.seed_scores = checkpoint["seed_scores"]
         level_sampler.seed_staleness = checkpoint["seed_staleness"]
@@ -164,8 +190,20 @@ def train(args, seeds):
         lr=args.lr,
         eps=args.eps,
         max_grad_norm=args.max_grad_norm,
-        env_name=args.env_name,
-        auxiliary_head=instance_predictor)
+        env_name=args.env_name)
+
+    if instance_predictor is not None:
+        instance_predictor_model = algo.InstancePredictorModel(
+            instance_predictor,
+            args.num_mini_batch_instance_predictor,
+            epoch=args.instance_predictor_epoch,
+            lr=args.lr_instance_predictor,
+            eps=args.eps_instance_predictor,
+            max_grad_norm=args.max_grad_norm_instance_predictor,
+            env_name=args.env_name,
+        )
+    else:
+        instance_predictor_model = None
 
     # === Load checkpoint ===
     if args.checkpoint:
@@ -185,7 +223,7 @@ def train(args, seeds):
             start_at_update = int(file.split('_')[1].split('.')[0])
             print(f'Checkpoint found at update {start_at_update}. Loading Checkpoint States\n')
             checkpoint = torch.load(checkpoint_path, map_location=lambda storage, loc: storage)
-            load_checkpoint(checkpoint, actor_critic, agent, level_sampler)
+            load_checkpoint(checkpoint, agent, level_sampler, instance_predictor_model)
             logging.info(f"Resuming preempted job after {start_at_update} updates\n") # 0-indexed next update
             logging.info(f"Clearing log files after {start_at_update} updates\n")
             plogger.delete_after_update(start_at_update)
@@ -201,86 +239,47 @@ def train(args, seeds):
         start_at_update = -1
     assert plogger.num_duplicates == 0, "Duplicate data detected within log directory. Aborting."
 
-    level_seeds = torch.zeros(args.num_processes)
-    if level_sampler:
-        obs, level_seeds = envs.reset()
-    else:
-        obs = envs.reset()
-    level_seeds = level_seeds.unsqueeze(-1)
-    level_seeds_gpu = level_seeds.to(device)
-    rollouts.obs[0].copy_(obs)
-    rollouts.to(device)
-
     episode_rewards = deque(maxlen=10)
     num_updates = int(
         args.num_env_steps) // args.num_steps // args.num_processes
 
     timer = timeit.default_timer
     update_start_time = timer()
+    first_reset = True
     for j in range(start_at_update + 1, num_updates):
+        level_sampler.secondary_strategy_coef = schedule_secondary_strategy_coef(args, j)
         actor_critic.train()
         if instance_predictor is not None:
-            instance_predictor.train()
-        for step in range(args.num_steps):
-            # Sample actions
-            with torch.no_grad():
-                obs_id = rollouts.obs[step]
-                value, instance_value, action, action_log_dist, recurrent_hidden_states, actor_features = actor_critic.act(
-                    obs_id, rollouts.recurrent_hidden_states[step], rollouts.masks[step], level_seeds)
-                action_log_prob = action_log_dist.gather(-1, action)
-                if instance_predictor is not None:
-                    instance_pred_dist = instance_predictor(actor_features.detach())
-                    instance_pred_logits = instance_pred_dist.logits
-                    instance_pred_entropy_rollouts = instance_pred_dist.entropy().unsqueeze(-1)
-                    instance_pred_accuracy_rollouts = instance_predictor.accuracy(instance_pred_logits, level_seeds_gpu)
-                    instance_pred_precision_rollouts = instance_predictor.precision(instance_pred_logits, level_seeds_gpu)
-                else:
-                    instance_pred_entropy_rollouts = torch.zeros_like(value)
-                    instance_pred_accuracy_rollouts = torch.zeros_like(value)
-                    instance_pred_precision_rollouts = torch.zeros_like(value)
-
-            # Obser reward and next obs
-            obs, reward, done, infos = envs.step(action)
-
-            # Reset all done levels by sampling from level sampler
-            for i, info in enumerate(infos):
-                if 'episode' in info.keys():
-                    episode_rewards.append(info['episode']['r'])
-
-                if level_sampler:
-                    level_seeds[i][0] = info['level_seed']
-
-            # If done then clean the history of observations.
-            masks = torch.FloatTensor(
-                [[0.0] if done_ else [1.0] for done_ in done])
-            bad_masks = torch.FloatTensor(
-                [[0.0] if 'bad_transition' in info.keys() else [1.0]
-                 for info in infos])
-
-            rollouts.insert(
-                obs, recurrent_hidden_states, 
-                action, action_log_prob, action_log_dist, 
-                value, instance_value, reward, masks, bad_masks, level_seeds,
-                instance_pred_entropy_rollouts, instance_pred_accuracy_rollouts, instance_pred_precision_rollouts)
-
-        with torch.no_grad():
-            obs_id = rollouts.obs[-1]
-            next_value = actor_critic.get_value(
-                obs_id, rollouts.recurrent_hidden_states[-1],
-                rollouts.masks[-1]).detach()
-            
-        rollouts.compute_returns(next_value, args.gamma, args.gae_lambda)
-
+            instance_predictor.eval()
+        rollouts, episode_rewards, instance_prediction_stats = collect_rollouts(args,
+                                                     rollouts,
+                                                     envs,
+                                                     actor_critic,
+                                                     instance_predictor_model=instance_predictor_model,
+                                                     episode_rewards=episode_rewards,
+                                                     reset=first_reset)
+        first_reset = False
         # Update level sampler
         if level_sampler:
-            level_sampler.update_with_rollouts(rollouts)
+            level_sampler.update_with_rollouts(rollouts, instance_prediction_stats)
 
-        value_loss, action_loss, dist_entropy, \
-            instance_pred_loss, instance_pred_entropy, instance_pred_accuracy, instance_pred_precision = \
-            agent.update(rollouts)
+        value_loss, action_loss, dist_entropy = agent.update(rollouts)
         rollouts.after_update()
         if level_sampler:
             level_sampler.after_update()
+
+        logging.info(f"\nEvaluating on {args.num_train_eval_episodes} train levels...\n  ")
+        eval_rollouts, train_eval_episode_rewards, _ = collect_rollouts(args,
+                                                               eval_rollouts,
+                                                               eval_envs,
+                                                               actor_critic,
+                                                               instance_predictor_model=None,
+                                                               num_episodes=args.num_train_eval_episodes,
+                                                               reset=True)
+        if instance_predictor_model is not None:
+            instance_pred_train_stats = instance_predictor_model.update(eval_rollouts)
+        else:
+            instance_pred_train_stats = defaultdict(int)
 
         # Log stats every log_interval updates or if it is the last update
         if (j % args.log_interval == 0 and len(episode_rewards) > 1) or j == num_updates - 1:
@@ -296,20 +295,16 @@ def train(args, seeds):
             eval_episode_rewards, eval_seeds = evaluate(args, actor_critic, args.num_test_seeds, device,
                                             start_level=args.num_train_seeds)
 
-            logging.info(f"\nEvaluating on {args.num_test_seeds} train levels...\n  ")
-            train_eval_episode_rewards, train_eval_seeds = evaluate(args, actor_critic, args.num_test_seeds, device,
-                                                                    start_level=0, num_levels=args.num_train_seeds,
-                                                                    seeds=seeds)
-
             stats = { 
                 "step": total_num_steps,
                 "pg_loss": action_loss,
                 "value_loss": value_loss,
                 "dist_entropy": dist_entropy,
-                "instance_pred_loss": instance_pred_loss,
-                "instance_pred_entropy": instance_pred_entropy,
-                "instance_pred_accuracy": instance_pred_accuracy,
-                "instance_pred_precision": instance_pred_precision,
+                "instance_pred_loss_train": instance_pred_train_stats["instance_pred_loss"],
+                "instance_pred_entropy_train": instance_pred_train_stats["instance_pred_entropy"],
+                "instance_pred_accuracy_train": instance_pred_train_stats["instance_pred_accuracy"],
+                "instance_pred_prob_train": instance_pred_train_stats["instance_pred_prob"],
+                "coef_secondary": level_sampler.secondary_strategy_coef,
                 "train:mean_episode_return": np.mean(episode_rewards),
                 "train:median_episode_return": np.median(episode_rewards),
                 "test:mean_episode_return": np.mean(eval_episode_rewards),
@@ -324,7 +319,7 @@ def train(args, seeds):
                 stats["test:success_rate"] = np.mean(np.array(eval_episode_rewards) > 0)
 
             if j == num_updates - 1:
-                logging.info(f"\nLast update: Evaluating on {args.num_test_seeds} test levels...\n  ")
+                logging.info(f"\nLast update: Evaluating on {args.final_num_test_seeds} test levels...\n  ")
                 final_eval_episode_rewards, final_eval_seeds = evaluate(args, actor_critic, args.final_num_test_seeds, device,
                                                                         start_level=args.num_train_seeds)
 
@@ -349,7 +344,11 @@ def train(args, seeds):
             plogger.log_level_instance_value_loss(level_sampler.sample_level_instance_value_loss())
             plogger.log_instance_pred_entropy(level_sampler.sample_instance_pred_entropy())
             plogger.log_instance_pred_accuracy(level_sampler.sample_instance_pred_accuracy())
+            plogger.log_instance_pred_log_prob(level_sampler.sample_instance_pred_log_prob())
+            plogger.log_instance_pred_prob(level_sampler.sample_instance_pred_prob())
             plogger.log_instance_pred_precision(level_sampler.sample_instance_pred_precision())
+            plogger.log_instance_pred_recall(level_sampler.sample_instance_pred_recall())
+            plogger.log_instance_pred_f1(level_sampler.sample_instance_pred_f1())
         # could also only clear buffers when we write logs however it may lead to stale data. this is more consistent.
         level_sampler.after_logging()
 
@@ -375,7 +374,125 @@ def generate_seeds(num_seeds, base_seed=0):
 def load_seeds(seed_path):
     seed_path = os.path.expandvars(os.path.expanduser(seed_path))
     seeds = open(seed_path).readlines()
-    return [int(s) for s in seeds] 
+    return [int(s) for s in seeds]
+
+
+def schedule_secondary_strategy_coef(args, num_update):
+    if args.level_replay_secondary_strategy == "off":
+        return 0.0
+    num_updates = int(args.num_env_steps) // args.num_steps // args.num_processes
+    start_coef = args.level_replay_secondary_strategy_coef_start
+    end_coef = args.level_replay_secondary_strategy_coef_end
+    end_update = int(num_updates * args.level_replay_secondary_strategy_coef_update_fraction)
+    delta = (end_coef - start_coef) / end_update
+    if num_update == 0:
+        return start_coef
+    elif num_update >= end_update:
+        return end_coef
+    else:
+        return start_coef + delta * num_update
+
+
+def collect_rollouts(
+        args,
+        rollouts,
+        envs,
+        actor_critic,
+        instance_predictor_model=None,
+        num_episodes=10,
+        episode_rewards=None,
+        reset = False,
+        deterministic=False,
+):
+
+    if reset:
+        obs, level_seeds = envs.reset()
+        rollouts.reset(obs)
+        level_seeds = level_seeds.unsqueeze(-1)
+    else:
+        level_seeds = rollouts.level_seeds[0].clone()
+
+    if episode_rewards is None:
+        episode_rewards = deque(maxlen=num_episodes)
+    else:
+        num_episodes = None
+
+    for step in range(rollouts.num_steps):
+        with torch.no_grad():
+            obs_id = rollouts.obs[step]
+            value, instance_value, action, action_log_dist, recurrent_hidden_states, actor_features = actor_critic.act(
+                obs_id,
+                rollouts.recurrent_hidden_states[step],
+                rollouts.masks[step],
+                level_seeds=level_seeds,
+                deterministic=deterministic)
+            action_log_prob = action_log_dist.gather(-1, action)
+
+        # Obser reward and next obs
+        obs, reward, done, infos = envs.step(action)
+
+        # Reset all done levels by sampling from level sampler
+        for i, info in enumerate(infos):
+            if 'episode' in info.keys():
+                episode_rewards.append(info['episode']['r'])
+
+            level_seeds[i][0] = info['level_seed']
+
+        # If done then clean the history of observations.
+        masks = torch.FloatTensor(
+            [[0.0] if done_ else [1.0] for done_ in done])
+        bad_masks = torch.FloatTensor(
+            [[0.0] if 'bad_transition' in info.keys() else [1.0]
+             for info in infos])
+
+        rollouts.insert(
+            obs, recurrent_hidden_states, actor_features,
+            action, action_log_prob, action_log_dist,
+            value, instance_value, reward, masks, bad_masks, level_seeds)
+
+    with torch.no_grad():
+        obs_id = rollouts.obs[-1]
+        next_value = actor_critic.get_value(
+            obs_id, rollouts.recurrent_hidden_states[-1],
+            rollouts.masks[-1]).detach()
+
+    rollouts.compute_returns(next_value, args.gamma, args.gae_lambda)
+
+    if instance_predictor_model is not None:
+        instance_prediction_stats = instance_predictor_model.predict(rollouts.actor_features[:-1], rollouts.level_seeds)
+        instance_pred_entropy_rollouts = instance_prediction_stats['instance_pred_entropy']
+        instance_pred_accuracy_rollouts = instance_prediction_stats['instance_pred_accuracy']
+        instance_pred_log_prob = instance_prediction_stats['instance_pred_log_prob']
+    else:
+        instance_prediction_stats = None
+        instance_pred_entropy_rollouts = torch.zeros_like(value)
+        instance_pred_accuracy_rollouts = torch.zeros_like(value)
+        instance_pred_log_prob = torch.zeros_like(value)
+
+    rollouts.insert_instance_pred(instance_pred_entropy_rollouts, instance_pred_accuracy_rollouts, instance_pred_log_prob)
+
+    if num_episodes is not None:
+        while len(episode_rewards) < num_episodes:
+            with torch.no_grad():
+                _, _, action, _, recurrent_hidden_states, _ = actor_critic.act(
+                    obs,
+                    recurrent_hidden_states,
+                    masks,
+                    level_seeds=torch.zeros_like(level_seeds),
+                    deterministic=deterministic)
+
+            obs, _, done, infos = envs.step(action)
+
+            masks = torch.tensor(
+                [[0.0] if done_ else [1.0] for done_ in done],
+                dtype=torch.float32,
+                device=rollouts.device)
+
+            for i, info in enumerate(infos):
+                if 'episode' in info.keys():
+                    episode_rewards.append(info['episode']['r'])
+
+    return rollouts, episode_rewards, instance_prediction_stats
 
 
 if __name__ == "__main__":
