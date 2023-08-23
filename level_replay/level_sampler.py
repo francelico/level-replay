@@ -198,9 +198,9 @@ class LevelSampler():
                 'instance_pred_prob': instance_pred_prob,
                 'instance_pred_accuracy': instance_pred_accuracy,
                 'instance_pred_entropy': instance_pred_entropy,
-                'instance_pred_precision': kwargs['precision'],
-                'instance_pred_recall': kwargs['recall'],
-                'instance_pred_f1': kwargs['f1-score'],
+                'instance_pred_precision': kwargs['precision'] if 'precision' in kwargs else np.nan,
+                'instance_pred_recall': kwargs['recall'] if 'recall' in kwargs else np.nan,
+                'instance_pred_f1': kwargs['f1-score'] if 'f1-score' in kwargs else np.nan,
                 }
 
     def _average_entropy(self, **kwargs):
