@@ -127,7 +127,6 @@ class InstancePredictor(nn.Module):
             hidden_size = input_size
         else:
             self.hidden_layer = init_relu_(nn.Linear(input_size, hidden_size))
-            self.layers.append(self.hidden_layer)
         self.dist = Categorical(hidden_size, num_instances)
 
     def forward(self, x):

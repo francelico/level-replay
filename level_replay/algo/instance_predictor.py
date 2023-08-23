@@ -35,14 +35,15 @@ class InstancePredictorModel():
         instance_pred_accuracy_epoch = 0
         instance_pred_prob_epoch = 0
 
-        if is_recurrent:
-            data_generator = rollouts.recurrent_generator(
-                advantages, self.num_mini_batch, balanced_sampling=False)
-        else:
-            data_generator = rollouts.feed_forward_generator(
-                advantages, self.num_mini_batch, balanced_sampling=False)
-
         for e in range(self.epoch):
+
+            if is_recurrent:
+                data_generator = rollouts.recurrent_generator(
+                    advantages, self.num_mini_batch, balanced_sampling=False)
+            else:
+                data_generator = rollouts.feed_forward_generator(
+                    advantages, self.num_mini_batch, balanced_sampling=False)
+
             for sample in data_generator:
                 obs_batch, recurrent_hidden_states_batch, hidden_features, _, _, _, _, masks_batch, _, _, level_seeds \
                     = sample
@@ -55,8 +56,7 @@ class InstancePredictorModel():
                 instance_pred_accuracy = self.instance_predictor.accuracy(instance_logits, level_seeds).mean()
                 instance_pred_loss = F.cross_entropy(instance_logits, level_seeds.flatten().to(torch.int64))
                 instance_pred_loss.backward()
-                nn.utils.clip_grad_norm_(self.instance_predictor.parameters(),
-                                        self.max_grad_norm)
+                nn.utils.clip_grad_norm_(self.instance_predictor.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
                 instance_pred_loss_epoch += instance_pred_loss.item()

@@ -39,7 +39,7 @@ parser.add_argument(
 parser.add_argument(
     '--lr_instance_predictor',
     type=float,
-    default=1e-3,
+    default=5e-4,
     help='learning rate for instance predictor')
 parser.add_argument(
     '--eps_instance_predictor',
@@ -49,7 +49,7 @@ parser.add_argument(
 parser.add_argument(
     '--instance_predictor_epoch',
     type=int,
-    default=3,
+    default=1,
     help='number of epochs for instance predictor')
 parser.add_argument(
     '--num_mini_batch_instance_predictor',
