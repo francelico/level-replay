@@ -446,7 +446,7 @@ def collect_rollouts(
              for info in infos])
 
         rollouts.insert(
-            obs, recurrent_hidden_states, actor_features,
+            obs, recurrent_hidden_states, actor_features.detach(),
             action, action_log_prob, action_log_dist,
             value, instance_value, reward, masks, bad_masks, level_seeds)
 
@@ -458,16 +458,17 @@ def collect_rollouts(
 
     rollouts.compute_returns(next_value, args.gamma, args.gae_lambda)
 
-    if instance_predictor_model is not None:
-        instance_prediction_stats = instance_predictor_model.predict(rollouts.actor_features[:-1], rollouts.level_seeds)
-        instance_pred_entropy_rollouts = instance_prediction_stats['instance_pred_entropy']
-        instance_pred_accuracy_rollouts = instance_prediction_stats['instance_pred_accuracy']
-        instance_pred_log_prob = instance_prediction_stats['instance_pred_log_prob']
-    else:
-        instance_prediction_stats = None
-        instance_pred_entropy_rollouts = torch.zeros_like(value)
-        instance_pred_accuracy_rollouts = torch.zeros_like(value)
-        instance_pred_log_prob = torch.zeros_like(value)
+    with torch.no_grad():
+        if instance_predictor_model is not None:
+            instance_prediction_stats = instance_predictor_model.predict(rollouts.actor_features[:-1], rollouts.level_seeds)
+            instance_pred_entropy_rollouts = instance_prediction_stats['instance_pred_entropy']
+            instance_pred_accuracy_rollouts = instance_prediction_stats['instance_pred_accuracy']
+            instance_pred_log_prob = instance_prediction_stats['instance_pred_log_prob']
+        else:
+            instance_prediction_stats = None
+            instance_pred_entropy_rollouts = torch.zeros_like(value)
+            instance_pred_accuracy_rollouts = torch.zeros_like(value)
+            instance_pred_log_prob = torch.zeros_like(value)
 
     rollouts.insert_instance_pred(instance_pred_entropy_rollouts, instance_pred_accuracy_rollouts, instance_pred_log_prob)
 

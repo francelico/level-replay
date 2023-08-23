@@ -292,8 +292,8 @@ class LevelSampler():
 
     def _update_with_rollouts(self, rollouts, score_function, instance_prediction_stats=None,
                               secondary_score_function=None):
-        level_seeds = rollouts.level_seeds
-        policy_logits = rollouts.action_log_dist
+        level_seeds = rollouts.level_seeds.detach()
+        policy_logits = rollouts.action_log_dist.detach()
         done = ~(rollouts.masks > 0)
         total_steps, num_actors = policy_logits.shape[:2]
         num_decisions = len(policy_logits)
@@ -317,13 +317,13 @@ class LevelSampler():
                 num_steps = len(episode_logits)
 
                 if self.requires_value_buffers:
-                    score_function_kwargs['returns'] = rollouts.returns[start_t:t,actor_index]
-                    score_function_kwargs['rewards'] = rollouts.rewards[start_t:t,actor_index]
-                    score_function_kwargs['value_preds'] = rollouts.value_preds[start_t:t,actor_index]
-                    score_function_kwargs['instance_value_preds'] = rollouts.instance_value_preds[start_t:t,actor_index]
-                    score_function_kwargs['instance_pred_log_prob'] = rollouts.instance_pred_log_prob[start_t:t,actor_index]
-                    score_function_kwargs['instance_pred_accuracy'] = rollouts.instance_pred_accuracy[start_t:t,actor_index]
-                    score_function_kwargs['instance_pred_entropy'] = rollouts.instance_pred_entropy[start_t:t,actor_index]
+                    score_function_kwargs['returns'] = rollouts.returns[start_t:t,actor_index].detach()
+                    score_function_kwargs['rewards'] = rollouts.rewards[start_t:t,actor_index].detach()
+                    score_function_kwargs['value_preds'] = rollouts.value_preds[start_t:t,actor_index].detach()
+                    score_function_kwargs['instance_value_preds'] = rollouts.instance_value_preds[start_t:t,actor_index].detach()
+                    score_function_kwargs['instance_pred_log_prob'] = rollouts.instance_pred_log_prob[start_t:t,actor_index].detach()
+                    score_function_kwargs['instance_pred_accuracy'] = rollouts.instance_pred_accuracy[start_t:t,actor_index].detach()
+                    score_function_kwargs['instance_pred_entropy'] = rollouts.instance_pred_entropy[start_t:t,actor_index].detach()
                     score_function_kwargs['done'] = True
                     if instance_prediction_stats is not None:
                         stats = instance_prediction_stats['classification_report'][str(seed_idx_t)]
@@ -350,13 +350,13 @@ class LevelSampler():
                 num_steps = len(episode_logits)
 
                 if self.requires_value_buffers:
-                    score_function_kwargs['returns'] = rollouts.returns[start_t:,actor_index]
-                    score_function_kwargs['rewards'] = rollouts.rewards[start_t:,actor_index]
-                    score_function_kwargs['value_preds'] = rollouts.value_preds[start_t:,actor_index]
-                    score_function_kwargs['instance_value_preds'] = rollouts.instance_value_preds[start_t:,actor_index]
-                    score_function_kwargs['instance_pred_log_prob'] = rollouts.instance_pred_log_prob[start_t:,actor_index]
-                    score_function_kwargs['instance_pred_accuracy'] = rollouts.instance_pred_accuracy[start_t:,actor_index]
-                    score_function_kwargs['instance_pred_entropy'] = rollouts.instance_pred_entropy[start_t:,actor_index]
+                    score_function_kwargs['returns'] = rollouts.returns[start_t:,actor_index].detach()
+                    score_function_kwargs['rewards'] = rollouts.rewards[start_t:,actor_index].detach()
+                    score_function_kwargs['value_preds'] = rollouts.value_preds[start_t:,actor_index].detach()
+                    score_function_kwargs['instance_value_preds'] = rollouts.instance_value_preds[start_t:,actor_index].detach()
+                    score_function_kwargs['instance_pred_log_prob'] = rollouts.instance_pred_log_prob[start_t:,actor_index].detach()
+                    score_function_kwargs['instance_pred_accuracy'] = rollouts.instance_pred_accuracy[start_t:,actor_index].detach()
+                    score_function_kwargs['instance_pred_entropy'] = rollouts.instance_pred_entropy[start_t:,actor_index].detach()
                     score_function_kwargs['done'] = False
                     if instance_prediction_stats is not None:
                         stats = instance_prediction_stats['classification_report'][str(seed_idx_t)]
