@@ -383,14 +383,15 @@ def schedule_secondary_strategy_coef(args, num_update):
     num_updates = int(args.num_env_steps) // args.num_steps // args.num_processes
     start_coef = args.level_replay_secondary_strategy_coef_start
     end_coef = args.level_replay_secondary_strategy_coef_end
-    end_update = int(num_updates * args.level_replay_secondary_strategy_coef_update_fraction)
-    delta = (end_coef - start_coef) / end_update
-    if num_update == 0:
-        return start_coef
+    start_update = int(num_updates * args.level_replay_secondary_strategy_fraction_start)
+    end_update = int(num_updates * args.level_replay_secondary_strategy_fraction_end)
+    delta = (end_coef - start_coef) / (end_update - start_update)
+    if num_update < start_update:
+        return 0.0
     elif num_update >= end_update:
         return end_coef
     else:
-        return start_coef + delta * num_update
+        return start_coef + delta * (num_update - start_update)
 
 
 def collect_rollouts(

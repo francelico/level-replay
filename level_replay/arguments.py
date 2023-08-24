@@ -253,7 +253,12 @@ parser.add_argument(
     default=0.0,
     help="Level replay coefficient balancing primary and secondary strategies, end value")
 parser.add_argument(
-    "--level_replay_secondary_strategy_coef_update_fraction",
+    "--level_replay_secondary_strategy_fraction_start",
+    type=float,
+    default=0.0,
+    help="Level replay coefficient balancing primary and secondary strategies, when to set to start value")
+parser.add_argument(
+    "--level_replay_secondary_strategy_fraction_end",
     type=float,
     default=1.0,
     help="Level replay coefficient balancing primary and secondary strategies, when to reach end value")
