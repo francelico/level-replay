@@ -26,7 +26,7 @@ class LogReader:
     def _get_logs(self, rolling_window=10):
 
         labels_to_smooth = ['train_eval:mean_episode_return', 'test:mean_episode_return', 'train:mean_episode_return',
-                            'instance_pred_accuracy', 'instance_pred_precision', 'instance_pred_entropy']
+                            'instance_pred_accuracy_train', 'instance_pred_prob_train', 'instance_pred_entropy_train']
         logs = [self._fix_logging_inconsistencies(fw) for fw in self.pid_filewriters]
 
         for i, log in enumerate(logs):
@@ -36,6 +36,7 @@ class LogReader:
 
         self.env_name = self.pid_filewriters[0].metadata['args']['env_name']
         self.level_replay_strategy = self.pid_filewriters[0].metadata['args']['level_replay_strategy']
+        self.level_replay_secondary_strategy = self.pid_filewriters[0].metadata['args']['level_replay_secondary_strategy']
         self.num_updates = int(logs[0]['# _tick'][-1])
         self.env_steps = logs[0]['step']
 
