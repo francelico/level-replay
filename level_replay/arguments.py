@@ -222,7 +222,7 @@ parser.add_argument(
     "--level_replay_strategy", 
     type=str,
     default='random',
-    choices=['off', 'random', 'sequential', 'policy_entropy', 'least_confidence', 'min_margin', 'gae', 'value_l1', 'one_step_td_error', 'instance_pred_log_prob'],
+    choices=['off', 'random', 'sequential', 'policy_entropy', 'least_confidence', 'min_margin', 'gae', 'value_l1', 'one_step_td_error', 'instance_pred_log_prob', 'positive_value_loss'],
     help="Level replay scoring strategy")
 # Level Replay arguments.
 parser.add_argument(
