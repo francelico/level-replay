@@ -8,7 +8,7 @@ import logging
 
 class LogReader:
 
-    def __init__(self, run_name, root_dir, output_dir, rolling_window=10):
+    def __init__(self, run_name, root_dir, output_dir, rolling_window=100):
 
         self.run_name = run_name
         self.root_dir = root_dir
@@ -21,7 +21,7 @@ class LogReader:
         if self._logger.hasHandlers():
             self._logger.handlers.clear()
 
-        self._get_logs(rolling_window=10)
+        self._get_logs(rolling_window=rolling_window)
 
     def _get_logs(self, rolling_window=10):
 
@@ -34,9 +34,12 @@ class LogReader:
                 data = pd.Series(log[label])
                 log[f'{label}_mavg'] = data.rolling(rolling_window).mean().to_numpy()
 
-        self.env_name = self.pid_filewriters[0].metadata['args']['env_name']
-        self.level_replay_strategy = self.pid_filewriters[0].metadata['args']['level_replay_strategy']
-        self.level_replay_secondary_strategy = self.pid_filewriters[0].metadata['args']['level_replay_secondary_strategy']
+        self.env_name = self.args['env_name']
+        self.level_replay_strategy = self.args['level_replay_strategy']
+        self.level_replay_secondary_strategy = self.args['level_replay_secondary_strategy']
+        self.secondary_strategy_fraction_end = self.args['level_replay_secondary_strategy_coef_update_fraction'] if \
+            'level_replay_secondary_strategy_coef_update_fraction' in self.args else \
+            self.args['level_replay_secondary_strategy_fraction_end']
         self.num_updates = int(logs[0]['# _tick'][-1])
         self.env_steps = logs[0]['step']
 
@@ -128,6 +131,24 @@ class LogReader:
         assert all([value == fw.metadata['args']['instance_predictor_hidden_size'] for fw in self.pid_filewriters]), \
             "All pids must have the same instance_predictor_hidden_size"
         return value
+
+    @property
+    def args(self)->dict:
+        return self.pid_filewriters[0].metadata['args']
+
+    @property
+    def final_test_eval_scores(self)->np.ndarray:
+        return np.array([float(fw.final_test_eval[0]['mean_episode_return']) for fw in self.pid_filewriters])
+
+    @property
+    def final_test_eval_mean(self):
+        return self.final_test_eval_scores.mean()
+
+    @property
+    def final_test_eval_std(self):
+        return self.final_test_eval_scores.std()
+
+
 
 
 if __name__ == '__main__':
