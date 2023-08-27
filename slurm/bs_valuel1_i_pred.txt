@@ -1,3 +1,3 @@
---env_name=bigfish --num_processes=64 --verbose --level_replay_strategy=value_l1 --level_replay_score_transform=rank --level_replay_temperature=0.1 --staleness_coef=0.1 --instance_predictor --instance_predictor_hidden_size=-1
---env_name=maze --num_processes=64 --verbose --level_replay_strategy=value_l1 --level_replay_score_transform=rank --level_replay_temperature=0.1 --staleness_coef=0.1 --instance_predictor --instance_predictor_hidden_size=-1
---env_name=leaper --num_processes=64 --verbose --level_replay_strategy=value_l1 --level_replay_score_transform=rank --level_replay_temperature=0.1 --staleness_coef=0.1 --instance_predictor --instance_predictor_hidden_size=-1
+--env_name=bigfish --num_processes=64 --level_replay_strategy=value_l1 --level_replay_score_transform=rank --level_replay_temperature=0.1 --staleness_coef=0.1 --instance_predictor --instance_predictor_hidden_size=-1
+--env_name=maze --num_processes=64 --level_replay_strategy=value_l1 --level_replay_score_transform=rank --level_replay_temperature=0.1 --staleness_coef=0.1 --instance_predictor --instance_predictor_hidden_size=-1
+--env_name=leaper --num_processes=64 --level_replay_strategy=value_l1 --level_replay_score_transform=rank --level_replay_temperature=0.1 --staleness_coef=0.1 --instance_predictor --instance_predictor_hidden_size=-1

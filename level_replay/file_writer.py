@@ -246,7 +246,7 @@ class FileWriter:
             with open(self.paths["meta"], "r") as f:
                 old_meta = json.load(f)
                 for arg in old_meta["args"]:
-                    if arg not in ["log_dir"]:
+                    if arg not in ["log_dir"] and arg not in ["verbose"]:
                         assert old_meta["args"][arg] == self.metadata["args"][arg], (
                             "Argument {} changed from {} to {}".format(
                                 arg, old_meta["args"][arg], self.metadata["args"][arg]
