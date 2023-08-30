@@ -245,13 +245,14 @@ class FileWriter:
             # )
             with open(self.paths["meta"], "r") as f:
                 old_meta = json.load(f)
-                for arg in old_meta["args"]:
-                    if arg not in ["log_dir"] and arg not in ["verbose"]:
-                        assert old_meta["args"][arg] == self.metadata["args"][arg], (
-                            "Argument {} changed from {} to {}".format(
-                                arg, old_meta["args"][arg], self.metadata["args"][arg]
+                if not xp_args.override_previous_args:
+                    for arg in old_meta["args"]:
+                        if arg not in ["log_dir", "verbose"]:
+                            assert old_meta["args"][arg] == self.metadata["args"][arg], (
+                                "Argument {} changed from {} to {}".format(
+                                    arg, old_meta["args"][arg], self.metadata["args"][arg]
+                                )
                             )
-                        )
                 self.metadata["previous_slurm"] = []
                 if "previous_slurm" in old_meta and isinstance(old_meta["previous_slurm"], list):
                     self.metadata["previous_slurm"].extend(old_meta["previous_slurm"])

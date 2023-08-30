@@ -347,3 +347,7 @@ parser.add_argument(
     type=float,
     default=0.0,
     help="Make a full backup of all run files at this update fraction. Set to 0.0 to disable.")
+parser.add_argument(
+    "--override_previous_args",
+    action="store_true",
+    help="Override previous args with current args.")
