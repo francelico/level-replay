@@ -56,6 +56,8 @@ def train(args, seeds):
         print("Experiment already completed ({}).".format(plogger.basepath))
         return
 
+    backup_update = full_backup_update(args)
+
     # Configure actor envs
     start_level = 0
     if args.full_train_distribution:
@@ -166,6 +168,11 @@ def train(args, seeds):
                 old_checkpoint_filenames.append(file)
         for file in old_checkpoint_filenames:
             os.remove(os.path.expandvars(os.path.expanduser(plogger.basepath + '/' + file)))
+
+    def make_full_backup(num_update):
+        save_checkpoint(update_number=num_update)
+        base_path = os.path.expandvars(os.path.expanduser("%s/%s" % (log_dir, args.xpid)))
+        shutil.copytree(base_path, base_path + '_bkup')
 
     def load_checkpoint(checkpoint, agent, level_sampler, instance_predictor_model):
         agent.actor_critic.load_state_dict(checkpoint["model_state_dict"])
@@ -362,6 +369,9 @@ def train(args, seeds):
             elif args.save_interval > 0 and timer() - last_checkpoint_time > args.save_interval * 60: # Save every args.save_interval min.
                 save_checkpoint(update_number=j)
                 last_checkpoint_time = timer()
+
+            if j == backup_update:
+                make_full_backup(j)
         except KeyboardInterrupt:
             return
     plogger.close(successful=True)
@@ -392,6 +402,12 @@ def schedule_secondary_strategy_coef(args, num_update):
         return end_coef
     else:
         return start_coef + delta * (num_update - start_update)
+
+
+def full_backup_update(args):
+    num_updates = int(args.num_env_steps) // args.num_steps // args.num_processes
+    full_backup_update = int(num_updates * args.backup_fraction) - 1
+    return full_backup_update
 
 
 def collect_rollouts(

@@ -342,3 +342,8 @@ parser.add_argument(
     "--checkpoint",
     action="store_true",
     help="Restarts from last saved checkpoint if it exists.")
+parser.add_argument(
+    "--backup_fraction",
+    type=float,
+    default=0.0,
+    help="Make a full backup of all run files at this update fraction. Set to 0.0 to disable.")
