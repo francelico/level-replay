@@ -245,7 +245,7 @@ class FileWriter:
             # )
             with open(self.paths["meta"], "r") as f:
                 old_meta = json.load(f)
-                if not xp_args.override_previous_args:
+                if not xp_args["override_previous_args"]:
                     for arg in old_meta["args"]:
                         if arg not in ["log_dir", "verbose"]:
                             assert old_meta["args"][arg] == self.metadata["args"][arg], (
