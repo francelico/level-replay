@@ -15,7 +15,7 @@ for experiment_list in "${experiment_lists[@]}"; do
     for experiment_no in `seq 1 ${NR_EXPTS}`; do
       while [ $JOBCOUNT -gt $MAXJOBS ]; do
         sleep 60
-        JOBCOUNT=`squeue -u $USER -h -t running -n $JOBNAME -r | wc -l`
+        JOBCOUNT=`squeue -u $USER -h -t pending,running -n $JOBNAME -r | wc -l`
         done
       echo "executing sbatch $batch_script $experiment_list $experiment_no"
       sbatch --job-name=$JOBNAME $batch_script $experiment_list $experiment_no
