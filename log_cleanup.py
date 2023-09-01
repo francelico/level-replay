@@ -599,8 +599,8 @@ if __name__ == "__main__":
         help='SWEEP PARAM: random seed')
 
     args = parser.parse_args()
-    rename_pids('~/procgen/level-replay/results')
-    rename_baserun_pids('~/procgen/level-replay/results')
+    rename_pids(os.path.expandvars(os.path.expanduser('~/procgen/level-replay/results')))
+    rename_baserun_pids(os.path.expandvars(os.path.expanduser('~/procgen/level-replay/results')))
     # create_full_exp_file(os.path.expandvars(os.path.expanduser('~/procgen/level-replay/slurm')),
     #                 'sweep_experiment.txt',
     #                 args.__dict__,
