@@ -312,6 +312,21 @@ def set_logdir(args, base_dir=None):
     return logdir
 
 
+def set_bootstrap_dir(args):
+
+    bootstrap_log_dir = f"e-{args['env_name']}_" \
+                        f"s1-{args['level_replay_strategy']}_" \
+                        f"fs-{args['level_replay_secondary_strategy_fraction_start']}_baserun"
+
+    bootstrap_pid =     f"e-{args['env_name']}_" \
+                        f"s1-{args['level_replay_strategy']}_" \
+                        f"fs-{args['level_replay_secondary_strategy_fraction_start']}_" \
+                        f"s-{args['seed']}"
+
+    bootstrap_dir = os.path.join(bootstrap_log_dir, bootstrap_pid)
+    return bootstrap_dir
+
+
 def create_exp_list(sweep_args: Dict[str, str], args: Dict[str, Any]):
 
     for arg in sweep_args:
@@ -379,11 +394,48 @@ def rename_pids(result_dir):
         shutil.rmtree(run_dir)
 
 
+def rename_baserun_pids(result_dir):
+    run_dirs = [os.path.join(result_dir, p) for p in os.listdir(result_dir)]
+    for run_dir in run_dirs:
+        if not run_dir.endswith('_baserun'):
+            continue
+        pid_dirs = [os.path.join(run_dir, p) for p in os.listdir(run_dir) if p != 'latest']
+        for pid_dir in pid_dirs:
+            plogger = FileWriter(rootdir=pid_dir,
+                                 seeds=[0], symlink_to_latest=False, no_setup=True
+                                 )
+            meta = plogger.metadata
+            args = meta['args']
+            update_args(args)
+
+            new_logdir = f"e-{args['env_name']}_" \
+                                f"s1-{args['level_replay_strategy']}_" \
+                                f"fs-{args['level_replay_secondary_strategy_fraction_start']}_baserun"
+            new_logdir = os.path.join(result_dir, new_logdir)
+            new_pid = f"e-{args['env_name']}_" \
+                            f"s1-{args['level_replay_strategy']}_" \
+                            f"fs-{args['level_replay_secondary_strategy_fraction_start']}_" \
+                            f"s-{args['seed']}"
+            meta['xpid'] = new_pid
+            args['xpid'] = new_pid
+            args['log_dir'] = new_logdir
+            plogger.metadata = meta
+            plogger.close(successful=plogger.completed)
+            if not os.path.exists(new_logdir):
+                os.makedirs(new_logdir)
+            if os.path.exists(os.path.join(new_logdir, new_pid)):
+                print(f"WARNING - run_pid {pid_dir} : {new_pid} already exists in {new_logdir}. Adding _extra")
+                new_pid += '_extra'
+            shutil.move(pid_dir, os.path.join(new_logdir, new_pid))
+        shutil.rmtree(run_dir)
+
+
 def create_full_exp_file(exp_dir: str,
                     filename: str,
                     args: Dict[str, Any],
                     setup_xpid: bool = False,
-                    setup_logdir: bool = False,):
+                    setup_logdir: bool = False,
+                    bootstrap: bool = False):
     # create a list of strings with all possible combinations of sweep_args and the shared fixed args
     # each string is a command line argument
     # write this list to a file in the experiment directory
@@ -405,6 +457,10 @@ def create_full_exp_file(exp_dir: str,
     if setup_xpid:
         for exp in exp_dictionaries:
             exp['xpid'] = set_xpid(exp)
+
+    if bootstrap:
+        for exp in exp_dictionaries:
+            exp['bootstrap_from_dir'] = set_bootstrap_dir(exp)
 
     exp_strings = []
     for exp in exp_dictionaries:
@@ -510,6 +566,8 @@ def create_todo_exp_file(input_exp_file=None,
                     print(f"Server {conf['server']} gets {end - start} experiments")
                 start = end
 
+    return todo_strings
+
 if __name__ == "__main__":
 
     #args
@@ -542,16 +600,17 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     # rename_pids('/home/francelico/dev/PhD/procgen/results/results_cp')
-
+    # rename_baserun_pids('/home/francelico/dev/PhD/procgen/results/results_cp')
     create_full_exp_file(os.path.expandvars(os.path.expanduser('~/dev/PhD/procgen/level-replay/slurm')),
                     'test_experiment.txt',
                     args.__dict__,
                     setup_xpid=True,
-                    setup_logdir=True)
-    create_todo_exp_file(input_exp_file=None,
-                         to_server=True,
+                    setup_logdir=True,
+                    bootstrap=True)
+    create_todo_exp_file(input_exp_file='test_experiment.txt',
+                         to_server=False,
                          result_dir='/home/francelico/dev/PhD/procgen/results/results_cp',
-                         keep_original_split=True)
+                         keep_original_split=False)
 
     sys.exit(0)
 

@@ -48,10 +48,11 @@
 # Exclude nodes with known issues
 #SBATCH --exclude=cn-g026
 
+# TODO does jobname count as an argument here?
+
 experiment=$1
 experiment_text_file="${experiment}.txt"
 experiment_no=$2
-SEED=$3
 
 # =====================
 # Logging information
@@ -81,7 +82,6 @@ conda activate ${CONDA_ENV_NAME}
 
 echo "Loading files on node"
 REPO_DIR=$HOME/procgen/level-replay
-OUT_DIR=$REPO_DIR/results
 
 # logic:
 # args: $1 = partition, $2 = array of experiment files \ {.txt}
@@ -100,11 +100,8 @@ OUT_DIR=$REPO_DIR/results
 # each line in experiment_lists.txt should be:
 # exp parameters \ { --xpid, --log_dir and --seed --dataset_path --generative_model_checkpoint_path --checkpoint}
 
-LOGDIR=${OUT_DIR}/${experiment}-${experiment_no}
-XPID="${experiment}-${experiment_no}-SEED-${SEED}"
-echo "Running experiment ${experiment_no} from ${experiment_text_file} with seed ${SEED} and xpid ${XPID}"
-echo "Saving logs to ${LOGDIR}"
-COMMAND="python ${REPO_DIR}/train.py `sed \"${experiment_no}q;d\" ${experiment_text_file}` --xpid ${XPID} --seed ${SEED} --log_dir ${LOGDIR} --checkpoint"
+echo "Running experiment ${experiment_no} from ${experiment_text_file}"
+COMMAND="python ${REPO_DIR}/train.py `sed \"${experiment_no}q;d\" ${experiment_text_file}`"
 echo "Running provided command: ${COMMAND}"
 eval "${COMMAND}"
 echo "Command ran successfully!"

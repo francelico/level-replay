@@ -42,6 +42,18 @@ def train(args, seeds):
 
     utils.seed(args.seed)
 
+    # bootstrap from an existing run
+    if args.bootstrap_from_dir is not None:
+        basepath = os.path.expandvars(os.path.expanduser(os.path.dirname(args.log_dir)))
+        bootstrap_dir = os.path.join(basepath, args.bootstrap_from_dir)
+
+        assert args.xpid is not None
+        run_dir = os.path.join(os.path.expandvars(os.path.expanduser(args.log_dir)), args.xpid)
+        if os.path.exists(run_dir):
+            print("Run dir already exists: {}".format(run_dir))
+        else:
+            shutil.copytree(bootstrap_dir, run_dir)
+
     # Configure logging
     if args.xpid is None:
         args.xpid = "lr-%s" % time.strftime("%Y%m%d-%H%M%S")

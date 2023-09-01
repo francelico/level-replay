@@ -351,3 +351,8 @@ parser.add_argument(
     "--override_previous_args",
     action="store_true",
     help="Override previous args with current args.")
+parser.add_argument(
+    "--bootstrap_from_dir",
+    type=str,
+    default=None,
+    help="Bootstrap from a previous run directory. Path provided is relative from log_dir parent directory.")
