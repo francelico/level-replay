@@ -9,7 +9,7 @@
     },
     {
     "server": "a1",
-    "use": true,
+    "use": false,
     "exp_file": "a1_exp_todo.txt",
     "max_exp": 25,
     "split_weight": 1,

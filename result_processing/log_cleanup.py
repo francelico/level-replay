@@ -599,18 +599,18 @@ if __name__ == "__main__":
         help='SWEEP PARAM: random seed')
 
     args = parser.parse_args()
-    # rename_pids('/home/francelico/dev/PhD/procgen/results/results_cp')
-    # rename_baserun_pids('/home/francelico/dev/PhD/procgen/results/results_cp')
-    create_full_exp_file(os.path.expandvars(os.path.expanduser('~/dev/PhD/procgen/level-replay/slurm')),
-                    'test_experiment.txt',
-                    args.__dict__,
-                    setup_xpid=True,
-                    setup_logdir=True,
-                    bootstrap=True)
-    create_todo_exp_file(input_exp_file='test_experiment.txt',
-                         to_server=False,
-                         result_dir='/home/francelico/dev/PhD/procgen/results/results_cp',
-                         keep_original_split=False)
+    rename_pids('~/procgen/level-replay/results')
+    rename_baserun_pids('~/procgen/level-replay/results')
+    # create_full_exp_file(os.path.expandvars(os.path.expanduser('~/procgen/level-replay/slurm')),
+    #                 'sweep_experiment.txt',
+    #                 args.__dict__,
+    #                 setup_xpid=True,
+    #                 setup_logdir=True,
+    #                 bootstrap=True)
+    # create_todo_exp_file(input_exp_file='sweep_experiment.txt',
+    #                      to_server=True,
+    #                      result_dir='/home/francelico/dev/PhD/procgen/results/results_cp',
+    #                      keep_original_split=False)
 
     sys.exit(0)
 

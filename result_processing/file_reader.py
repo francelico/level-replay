@@ -148,7 +148,33 @@ class LogReader:
     def final_test_eval_std(self):
         return self.final_test_eval_scores.std()
 
+    @property
+    def completed(self):
+        return all([fw.completed for fw in self.pid_filewriters])
 
+    @property
+    def s1(self):
+        return self.args['level_replay_strategy']
+
+    @property
+    def s2(self):
+        return self.args['level_replay_secondary_strategy']
+
+    @property
+    def bf(self):
+        return self.args['level_replay_secondary_strategy_coef_end']
+
+    @property
+    def l2(self):
+        return self.args['level_replay_secondary_temperature']
+
+    @property
+    def fs(self):
+        return self.args['level_replay_strategy_fraction_start']
+
+    @property
+    def fe(self):
+        return self.secondary_strategy_fraction_end
 
 
 if __name__ == '__main__':
