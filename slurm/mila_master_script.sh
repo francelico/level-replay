@@ -20,6 +20,7 @@ for experiment_list in "${experiment_lists[@]}"; do
       echo "executing sbatch $batch_script $experiment_list $experiment_no"
       sbatch --job-name=$JOBNAME $batch_script $experiment_list $experiment_no
       sleep ${SLEEP_TIME}
+      JOBCOUNT=`squeue -u $USER -h -t pending,running -n $JOBNAME -r | wc -l`
     done
 done
 
