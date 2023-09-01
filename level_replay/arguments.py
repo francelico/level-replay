@@ -135,7 +135,7 @@ parser.add_argument(
 parser.add_argument(
     '--num_env_steps',
     type=int,
-    default=25e6,
+    default=int(25e6),
     help='number of environment steps to train')
 parser.add_argument(
     '--env_name',
@@ -148,7 +148,7 @@ parser.add_argument(
     help='name for the run - prefix to log files')
 parser.add_argument(
     '--log_dir',
-    default='~/logs/ppo/',
+    default='~/procgen/level_replay/results',
     help='directory to save agent logs')
 parser.add_argument(
     '--no_cuda',

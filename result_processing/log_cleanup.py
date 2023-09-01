@@ -1,12 +1,20 @@
+import itertools
+import json
 import sys
 import os
 import re
 import shutil
 import csv
+from collections import defaultdict
+from typing import Dict, Any
+import copy
+import shlex
+
 import torch
 import numpy as np
 
 from level_replay.file_writer import FileWriter, overwrite_file
+from level_replay.arguments import parser
 
 
 def grep(pattern, file):
@@ -250,5 +258,300 @@ def recover_level_sampler(plogger, num_updates):
 
     return seeds, seed_scores, seed_staleness, unseen_seed_weights, next_seed_index
 
-sys.exit(0)
+
+def clone_dirs(src_dir, dest_dirs):
+    for dest_dir in dest_dirs:
+        shutil.copytree(src_dir, dest_dir)
+
+
+def arg_product(arguments):
+    return list(dict(zip(arguments.keys(), values)) for values in itertools.product(*arguments.values()))
+
+def update_args(args):
+
+    if 'level_replay_secondary_strategy_coef_end' not in args:
+        args['level_replay_secondary_strategy_coef_end'] = 0.0
+    if 'level_replay_secondary_temperature' not in args:
+        args['level_replay_secondary_temperature'] = 1.0
+    if 'level_replay_secondary_strategy' not in args:
+        args['level_replay_secondary_strategy'] = 'off'
+    if 'level_replay_secondary_strategy_fraction_end' not in args:
+        if 'level_replay_secondary_strategy_coef_update_fraction' in args:
+            args['level_replay_secondary_strategy_fraction_end'] = args['level_replay_secondary_strategy_coef_update_fraction']
+        else:
+            args['level_replay_secondary_strategy_fraction_end'] = 0.0
+    if 'level_replay_secondary_strategy_fraction_start' not in args:
+        args['level_replay_secondary_strategy_fraction_start'] = 0.0
+
+def set_xpid(args):
+
+    xpid = f"e-{args['env_name']}_" \
+            f"s1-{args['level_replay_strategy']}_" \
+            f"s2-{args['level_replay_secondary_strategy']}_" \
+            f"bf-{args['level_replay_secondary_strategy_coef_end']}_" \
+            f"l2-{args['level_replay_secondary_temperature']}_" \
+            f"fs-{args['level_replay_secondary_strategy_fraction_start']}_" \
+            f"fe-{args['level_replay_secondary_strategy_fraction_end']}_" \
+            f"s-{args['seed']}"
+    return xpid
+
+
+def set_logdir(args, base_dir=None):
+
+    if base_dir is None:
+        base_dir = args['log_dir']
+    logdir = os.path.join(base_dir,
+                          f"e-{args['env_name']}_"
+                          f"s1-{args['level_replay_strategy']}_"
+                          f"s2-{args['level_replay_secondary_strategy']}_"
+                          f"bf-{args['level_replay_secondary_strategy_coef_end']}_"
+                          f"l2-{args['level_replay_secondary_temperature']}_"
+                          f"fs-{args['level_replay_secondary_strategy_fraction_start']}_"
+                          f"fe-{args['level_replay_secondary_strategy_fraction_end']}"
+                          )
+    return logdir
+
+
+def create_exp_list(sweep_args: Dict[str, str], args: Dict[str, Any]):
+
+    for arg in sweep_args:
+        assert isinstance(sweep_args[arg], str)
+        assert arg in args
+        sweep_args[arg] = sweep_args[arg].split(",")
+
+    sweep_dictionaries = arg_product(sweep_args)
+
+    exp_dictionaries = []
+    for exp in sweep_dictionaries:
+        exp_d = copy.deepcopy(args)
+        exp_d.update(exp)
+        exp_dictionaries.append(exp_d)
+
+    return exp_dictionaries
+
+
+def args2string(dict_args: Dict[str, Any]):
+    string = []
+    for key in dict_args:
+        if key.endswith("_SWEEP"):
+            continue
+        if isinstance(dict_args[key], bool):
+            if dict_args[key]:
+                string.append("--" + key)
+            else:
+                continue
+        elif dict_args[key] is None:
+            continue
+        else:
+            string.append("--" + key + "=" + str(dict_args[key]))
+    return " ".join(string)
+
+
+##########################
+
+# Rename the xpids and logdirs of the experiments in the result directory according to convention
+def rename_pids(result_dir):
+    run_dirs = [os.path.join(result_dir, p) for p in os.listdir(result_dir)]
+    for run_dir in run_dirs:
+        pid_dirs = [os.path.join(run_dir, p) for p in os.listdir(run_dir) if p != 'latest']
+        for pid_dir in pid_dirs:
+            plogger = FileWriter(rootdir=pid_dir,
+                                 seeds=[0], symlink_to_latest=False, no_setup=True
+                                 )
+            meta = plogger.metadata
+            args = meta['args']
+            update_args(args)
+            new_pid = set_xpid(args)
+            new_logdir = set_logdir(args, base_dir=result_dir)
+            if pid_dir.endswith('_bkup'):
+                new_logdir += '_baserun'
+            meta['xpid'] = new_pid
+            args['xpid'] = new_pid
+            args['log_dir'] = new_logdir
+            plogger.metadata = meta
+            plogger.close(successful=plogger.completed)
+            if not os.path.exists(new_logdir):
+                os.makedirs(new_logdir)
+            if os.path.exists(os.path.join(new_logdir, new_pid)):
+                print(f"WARNING - run_pid {pid_dir} : {new_pid} already exists in {new_logdir}. Adding _extra")
+                new_pid += '_extra'
+            shutil.move(pid_dir, os.path.join(new_logdir, new_pid))
+        shutil.rmtree(run_dir)
+
+
+def create_full_exp_file(exp_dir: str,
+                    filename: str,
+                    args: Dict[str, Any],
+                    setup_xpid: bool = False,
+                    setup_logdir: bool = False,):
+    # create a list of strings with all possible combinations of sweep_args and the shared fixed args
+    # each string is a command line argument
+    # write this list to a file in the experiment directory
+
+    sweep_args = {}
+    for arg in list(args.keys()):
+        if arg.endswith("_SWEEP"):
+            if args[arg] is not None:
+                arg_sw = arg.replace("_SWEEP", "")
+                sweep_args[arg_sw] = args[arg]
+            del args[arg]
+
+    exp_dictionaries = create_exp_list(sweep_args, args)
+
+    if setup_logdir:
+        for exp in exp_dictionaries:
+            exp['log_dir'] = set_logdir(exp)
+
+    if setup_xpid:
+        for exp in exp_dictionaries:
+            exp['xpid'] = set_xpid(exp)
+
+    exp_strings = []
+    for exp in exp_dictionaries:
+        string = args2string(exp)
+        exp_strings.append(string)
+
+    with open(os.path.join(exp_dir, filename), "w") as exp_file:
+        exp_file.write("\n".join(exp_strings))
+
+    return exp_strings
+
+
+def create_todo_exp_file(input_exp_file=None,
+                         result_dir=None,
+                         slurm_exp_dir=None,
+                         server_config_file='server_config.json',
+                         to_server=False,
+                         keep_original_split=False,
+                         verbose=True):
+
+    repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0])))
+    if slurm_exp_dir is None:
+        slurm_exp_dir = os.path.join(repo_dir, 'slurm')
+    if result_dir is None:
+        result_dir = os.path.join(repo_dir, 'results')
+
+    server_config = json.load(open(os.path.join(slurm_exp_dir, server_config_file), 'r'))
+    server_config = [conf for conf in server_config if conf['use']]
+
+    if to_server:
+        if input_exp_file is None:
+            input_exp_file = [conf['exp_file'] for conf in server_config]
+        else:
+            input_exp_file = input_exp_file.split(",")
+        output_exp_file = [conf['exp_file'] for conf in server_config]
+        result_dir_out = [conf['result_dir'] for conf in server_config]
+        if keep_original_split:
+            assert input_exp_file == output_exp_file, \
+                "If keep_original_split is True, input_exp_file and output_exp_file must be the same"
+    else:
+        assert input_exp_file is not None
+        input_exp_file = input_exp_file.split(",")
+        assert len(input_exp_file) == 1
+        assert not keep_original_split, "keep_original_split is only supported when to_server is False"
+        output_exp_file = [input_exp_file[0].split('.txt')[0] + '_todo.txt']
+        result_dir_out = result_dir.split(',')
+
+    exp_strings = defaultdict(list)
+    for i, exp_file in enumerate(input_exp_file):
+        exp_strings[exp_file] += open(exp_file, 'r').readlines()
+        if verbose:
+            print(f"Added {len(exp_strings[exp_file])} experiments from {exp_file}")
+
+    # remove completed runs
+    todo_strings = defaultdict(list)
+    for i, exp_file in enumerate(exp_strings):
+        for string in exp_strings[exp_file]:
+            args = parser.parse_args(shlex.split(string)).__dict__
+            log_dirname = os.path.basename(args['log_dir'])
+            pid_dir = os.path.join(result_dir, log_dirname, args['xpid'])
+            new_logdir = os.path.join(result_dir_out[i], log_dirname)
+            args['log_dir'] = new_logdir
+            new_string = args2string(args)
+            if os.path.exists(pid_dir):
+                print(f"Found {pid_dir}")
+                plogger = FileWriter(rootdir=pid_dir, seeds=[0], symlink_to_latest=False, no_setup=True)
+                if not plogger.completed:
+                    todo_strings[exp_file].append(new_string)
+            else:
+                todo_strings[exp_file].append(new_string)
+
+    if not to_server:
+        assert len(output_exp_file) == 1
+        with open(os.path.join(slurm_exp_dir, output_exp_file[0]), 'w') as f:
+            for exp_file in todo_strings:
+                for line in todo_strings[exp_file]:
+                    f.write(line + '\n')
+    else:
+        # split experiments across servers
+        if keep_original_split:
+            for i, exp_file in enumerate(input_exp_file):
+                with open(os.path.join(slurm_exp_dir, output_exp_file[i]), 'w') as f:
+                    for line in todo_strings[exp_file]:
+                        f.write(line + '\n')
+                if verbose:
+                    print(f"Server {server_config[i]['server']} gets {len(todo_strings[exp_file])} experiments")
+        else:
+            all_exp_strings = []
+            for exp_file in todo_strings:
+                all_exp_strings += todo_strings[exp_file]
+            num_exp = len(all_exp_strings)
+            z = sum([conf['split_weight'] for conf in server_config])
+            start = 0
+            for i, conf in enumerate(server_config):
+                if i == len(server_config) - 1:
+                    end = num_exp
+                else:
+                    end = start + int(conf['split_weight'] / z * num_exp)
+                with open(os.path.join(slurm_exp_dir, output_exp_file[i]), 'w') as f:
+                    for line in all_exp_strings[start:end]:
+                        f.write(line + '\n')
+                if verbose:
+                    print(f"Server {conf['server']} gets {end - start} experiments")
+                start = end
+
+if __name__ == "__main__":
+
+    #args
+    # --num_processes=64 --level_replay_strategy=value_l1
+    # --level_replay_score_transform=rank --level_replay_temperature=0.1 --staleness_coef=0.1
+    # --instance_predictor --instance_predictor_hidden_size=-1 --level_replay_secondary_strategy=instance_pred_log_prob
+    # --level_replay_secondary_strategy_fraction_start=0.5 --checkpoint --log_dir=~/procgen/level-replay/results
+
+    parser.add_argument(
+        "--level_replay_secondary_temperature_SWEEP",
+        type=str,
+        default='0.1,0.5,1.0,2.0',
+        help="SWEEP PARAM: Level replay scoring strategy")
+    parser.add_argument(
+        "--level_replay_secondary_strategy_coef_end_SWEEP",
+        type=str,
+        default='0.25,0.5,1.0',
+        help="SWEEP PARAM: Level replay coefficient balancing primary and secondary strategies, end value")
+    parser.add_argument(
+        '--env_name_SWEEP',
+        type=str,
+        default='bigfish,heist,climber,caveflyer,jumper,fruitbot,plunder,coinrun,ninja,leaper,'
+                'maze,miner,dodgeball,starpilot,chaser,bossfight',
+        help='SWEEP PARAM: environment to train on')
+    parser.add_argument(
+        '--seed_SWEEP',
+        type=str,
+        default='8,88,888,8888',
+        help='SWEEP PARAM: random seed')
+
+    args = parser.parse_args()
+    # rename_pids('/home/francelico/dev/PhD/procgen/results/results_cp')
+
+    create_full_exp_file(os.path.expandvars(os.path.expanduser('~/dev/PhD/procgen/level-replay/slurm')),
+                    'test_experiment.txt',
+                    args.__dict__,
+                    setup_xpid=True,
+                    setup_logdir=True)
+    create_todo_exp_file(input_exp_file=None,
+                         to_server=True,
+                         result_dir='/home/francelico/dev/PhD/procgen/results/results_cp',
+                         keep_original_split=True)
+
+    sys.exit(0)
 
