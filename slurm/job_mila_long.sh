@@ -99,7 +99,8 @@ REPO_DIR=$HOME/procgen/level-replay
 # exp parameters \ { --xpid, --log_dir and --seed --dataset_path --generative_model_checkpoint_path --checkpoint}
 
 echo "Running experiment ${experiment_no} from ${experiment_text_file}"
-COMMAND="python ${REPO_DIR}/train.py `sed \"${experiment_no}q;d\" ${experiment_text_file}`"echo "Running provided command: ${COMMAND}"
+COMMAND="python ${REPO_DIR}/train.py `sed \"${experiment_no}q;d\" ${experiment_text_file}`"
+echo "Running provided command: ${COMMAND}"
 eval "${COMMAND}"
 echo "Command ran successfully!"
 
