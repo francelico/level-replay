@@ -8,22 +8,32 @@ import logging
 
 class LogReader:
 
-    def __init__(self, run_name, root_dir, output_dir, rolling_window=100):
+    def __init__(self, run_name, root_dir, output_dir, rolling_window=100, seeds=None, ignore_extra=False):
 
         self.run_name = run_name
         self.root_dir = root_dir
         self.run_dir = os.path.join(root_dir, run_name)
         self.output_dir = output_dir
         self.pid_dirs = [os.path.join(self.run_dir, p) for p in os.listdir(self.run_dir) if p != 'latest']
+        if ignore_extra:
+            self.pid_dirs = [p for p in self.pid_dirs if not p.endswith('_extra')]
         self.pid_filewriters = [FileWriter(rootdir=str(p), no_setup=True, symlink_to_latest=False) for p in self.pid_dirs]
+        self.pid_filewriters = [fw for fw in self.pid_filewriters if fw.completed]
 
         self._logger = logging.getLogger(self.__class__.__name__)
         if self._logger.hasHandlers():
             self._logger.handlers.clear()
 
-        self._get_logs(rolling_window=rolling_window)
+        self._get_logs(rolling_window=rolling_window, seeds=seeds)
 
-    def _get_logs(self, rolling_window=10):
+    def _get_logs(self, rolling_window=10, seeds=None):
+
+        if seeds is not None:
+            self.pid_filewriters = [fw for fw in self.pid_filewriters if str(fw.metadata['args']['seed']) in seeds]
+            if len(self.pid_filewriters) != len(seeds):
+                self._logger.warning(f'Not all seeds were found in the run {self.run_name}.')
+                self._logs = None
+                return
 
         labels_to_smooth = ['train_eval:mean_episode_return', 'test:mean_episode_return', 'train:mean_episode_return',
                             'instance_pred_accuracy_train', 'instance_pred_prob_train', 'instance_pred_entropy_train']
@@ -150,6 +160,8 @@ class LogReader:
 
     @property
     def completed(self):
+        if not self.pid_filewriters:
+            return False
         return all([fw.completed for fw in self.pid_filewriters])
 
     @property

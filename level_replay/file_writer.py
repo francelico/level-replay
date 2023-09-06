@@ -86,16 +86,16 @@ class FileWriter:
         self._tick = 0
         self.no_setup = no_setup
 
-        # formatter = logging.Formatter("%(message)s")
-        # self._logger = logging.getLogger("logs/out")
-        # if self._logger.hasHandlers():
-        #     self._logger.handlers.clear()
+        formatter = logging.Formatter("%(message)s")
+        self._logger = logging.getLogger("logs/out")
+        if self._logger.hasHandlers():
+            self._logger.handlers.clear()
 
         # To stdout handler.logging.streamhandler()
-        # shandle = logging.StreamHandler()
-        # shandle.setFormatter(formatter)
-        # self._logger.addHandler(shandle)
-        # self._logger.setLevel(logging.INFO)
+        shandle = logging.StreamHandler()
+        shandle.setFormatter(formatter)
+        self._logger.addHandler(shandle)
+        self._logger.setLevel(logging.INFO)
 
         rootdir = os.path.expandvars(os.path.expanduser(rootdir))
         # To file handler.
@@ -106,10 +106,10 @@ class FileWriter:
         if not os.path.exists(self.basepath):
             if self.no_setup:
                 raise FileNotFoundError("Log directory not found in read-only mode: %s" % self.basepath)
-            # self._logger.info("Creating log directory: %s", self.basepath)
+            self._logger.info("Creating log directory: %s", self.basepath)
             os.makedirs(self.basepath, exist_ok=True)
-        # else:
-        #     self._logger.info("Found log directory: %s", self.basepath)
+        else:
+            self._logger.info("Found log directory: %s", self.basepath)
 
         if symlink_to_latest and not self.no_setup:
             # Add 'latest' as symlink unless it exists and is no symlink.
@@ -119,7 +119,7 @@ class FileWriter:
                     os.remove(symlink)
                 if not os.path.exists(symlink):
                     os.symlink(self.basepath, symlink)
-                    # self._logger.info("Symlinked log directory: %s", symlink)
+                    self._logger.info("Symlinked log directory: %s", symlink)
             except OSError:
                 # os.remove() or os.symlink() raced. Don't do anything.
                 pass
@@ -143,26 +143,26 @@ class FileWriter:
             final_test_eval="{base}/final_test_eval.csv".format(base=self.basepath)
         )
 
-        # self._logger.info("Saving messages to %s", self.paths["msg"])
-        # if os.path.exists(self.paths["msg"]) and not self.no_setup:
-        #     self._logger.warning(
-        #         "Path to message file already exists. " "New data will be appended."
-        #     )
-        #
-        # # fhandle = logging.FileHandler(self.paths["msg"])
-        # fhandle.setFormatter(formatter)
-        # self._logger.addHandler(fhandle)
-        #
-        # if not self.no_setup:
-        #     self._logger.info("Saving logs data to %s", self.paths["logs"])
-        #     self._logger.info("Saving logs' fields to %s", self.paths["fields"])
+        self._logger.info("Saving messages to %s", self.paths["msg"])
+        if os.path.exists(self.paths["msg"]) and not self.no_setup:
+            self._logger.warning(
+                "Path to message file already exists. " "New data will be appended."
+            )
+
+        fhandle = logging.FileHandler(self.paths["msg"])
+        fhandle.setFormatter(formatter)
+        self._logger.addHandler(fhandle)
+
+        if not self.no_setup:
+            self._logger.info("Saving logs data to %s", self.paths["logs"])
+            self._logger.info("Saving logs' fields to %s", self.paths["fields"])
         self.fieldnames = ["_tick", "_time"]
         self.final_test_eval_fieldnames = ['num_test_seeds', 'mean_episode_return', 'median_episode_return']
         if os.path.exists(self.paths["logs"]):
-            # if not self.no_setup:
-            #     self._logger.warning(
-            #         "Path to log file already exists. " "New data will be appended."
-            #     )
+            if not self.no_setup:
+                self._logger.warning(
+                    "Path to log file already exists. " "New data will be appended."
+                )
             # Override default fieldnames.
             with open(self.paths["fields"], "r") as csvfile:
                 reader = csv.reader(csvfile)
@@ -238,11 +238,11 @@ class FileWriter:
         self.metadata["args"] = copy.deepcopy(xp_args)
         self.metadata["xpid"] = self.xpid
 
-        # self._logger.info("Saving arguments to %s", self.paths["meta"])
+        self._logger.info("Saving arguments to %s", self.paths["meta"])
         if os.path.exists(self.paths["meta"]):
-            # self._logger.warning(
-            #     "Path to meta file already exists. " "Will check if arguments match and if they do will overwritte."
-            # )
+            self._logger.warning(
+                "Path to meta file already exists. " "Will check if arguments match and if they do will overwritte."
+            )
             with open(self.paths["meta"], "r") as f:
                 old_meta = json.load(f)
                 if not xp_args["override_previous_args"]:
@@ -316,16 +316,16 @@ class FileWriter:
                 self.fieldnames.append(k)
         if old_len != len(self.fieldnames):
             self._fieldwriter.writerow(self.fieldnames)
-            # self._logger.info("Updated log fields: %s", self.fieldnames)
+            self._logger.info("Updated log fields: %s", self.fieldnames)
 
         if to_log["_tick"] == 0:
             self._logfile.write("# %s\n" % ",".join(self.fieldnames))
 
-        # if verbose:
-        #     self._logger.info(
-        #         "LOG | %s",
-        #         ", ".join(["{}: {}".format(k, to_log[k]) for k in sorted(to_log)]),
-        #     )
+        if verbose:
+            self._logger.info(
+                "LOG | %s",
+                ", ".join(["{}: {}".format(k, to_log[k]) for k in sorted(to_log)]),
+            )
 
         self._logwriter.writerow(to_log)
         self._logfile.flush()

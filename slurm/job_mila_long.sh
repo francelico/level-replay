@@ -34,13 +34,13 @@
 #SBATCH --gres=gpu:1
 
 # Megabytes of RAM required. Check `cluster-status` for node configurations
-#SBATCH --mem=40000
+#SBATCH --mem=25000
 
 # Number of CPUs to use. Check `cluster-status` for node configurations
 #SBATCH --cpus-per-task=8
 
 # Maximum time for the job to run, format: days-hours:minutes:seconds
-#SBATCH --time=0-16:00:00
+#SBATCH --time=0-8:00:00
 
 # Requeue jobs if they fail
 #SBATCH --requeue

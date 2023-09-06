@@ -481,7 +481,7 @@ def create_todo_exp_file(input_exp_file=None,
                          keep_original_split=False,
                          verbose=True):
 
-    repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0])))
+    repo_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
     if slurm_exp_dir is None:
         slurm_exp_dir = os.path.join(repo_dir, 'slurm')
     if result_dir is None:
@@ -599,18 +599,18 @@ if __name__ == "__main__":
         help='SWEEP PARAM: random seed')
 
     args = parser.parse_args()
-    rename_pids(os.path.expandvars(os.path.expanduser('~/procgen/level-replay/results')))
-    rename_baserun_pids(os.path.expandvars(os.path.expanduser('~/procgen/level-replay/results')))
+    # rename_pids(os.path.expandvars(os.path.expanduser('~/procgen/level-replay/results')))
+    # rename_baserun_pids(os.path.expandvars(os.path.expanduser('~/procgen/level-replay/results')))
     # create_full_exp_file(os.path.expandvars(os.path.expanduser('~/procgen/level-replay/slurm')),
     #                 'sweep_experiment.txt',
     #                 args.__dict__,
     #                 setup_xpid=True,
     #                 setup_logdir=True,
     #                 bootstrap=True)
-    # create_todo_exp_file(input_exp_file='sweep_experiment.txt',
-    #                      to_server=True,
-    #                      result_dir='/home/francelico/dev/PhD/procgen/results/results_cp',
-    #                      keep_original_split=False)
+    create_todo_exp_file(input_exp_file='sweep_experiment.txt',
+                         to_server=True,
+                         result_dir='/home/francelico/dev/PhD/procgen/results/results_cp',
+                         keep_original_split=False)
 
     sys.exit(0)
 

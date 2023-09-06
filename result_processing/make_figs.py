@@ -65,7 +65,7 @@ def parse_args():
     parser.add_argument(
         '--base_path',
         type=str,
-        default='/home/francelico/dev/PhD/procgen/results/results_cp',
+        default='/home/francelico/dev/PhD/procgen/results/results',
         help='Base path to experiment results directories.')
     parser.add_argument(
         '--output_path',
@@ -94,6 +94,11 @@ def parse_args():
         '--ignore_extra_pids',
         action="store_true",
         help='Ignore extra pids in directory.')
+    parser.add_argument(
+        '--seeds',
+        type=str,
+        default=None,
+        help='seeds to pick in each directory.')
 
     return parser.parse_args()
 
@@ -180,11 +185,14 @@ if __name__ == '__main__':
     logger = logging.getLogger(__name__)
     args=parse_args()
     os.makedirs(args.output_path, exist_ok=True)
+    seeds = args.seeds.split(',') if args.seeds else None
+    if seeds is not None:
+        args.ignore_extra_pids = True
 
     all_run_names = [name for name in os.listdir(args.base_path) if os.path.isdir(os.path.join(args.base_path, name))]
     ignore_patterns = args.ignore_runs.split(',')
     run_names = [name for name in all_run_names if not any([re.search(pattern, name) for pattern in ignore_patterns])]
-    log_readers = [reader.LogReader(run_name, args.base_path, args.output_path) for run_name in run_names]
+    log_readers = [reader.LogReader(run_name, args.base_path, args.output_path, seeds=seeds, ignore_extra=args.ignore_extra_pids) for run_name in run_names]
     log_readers = [log_reader for log_reader in log_readers if log_reader.completed]
 
     temp = defaultdict(list)
@@ -197,6 +205,12 @@ if __name__ == '__main__':
 
     log_readers = temp
 
+    for key in list(log_readers.keys()):
+        if len(log_readers[key]) < 16:
+            del log_readers[key]
+        for i, log_reader in enumerate(log_readers[key]):
+            if not hasattr(log_reader, 'env_name'):
+                print(key, i)
     stats = {}
     for run_id in log_readers:
         scn = mean_normalised_scores(log_readers[run_id])
