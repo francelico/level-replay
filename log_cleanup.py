@@ -609,7 +609,7 @@ if __name__ == "__main__":
     #                 bootstrap=True)
     create_todo_exp_file(input_exp_file='sweep_experiment.txt',
                          to_server=True,
-                         result_dir='/home/francelico/dev/PhD/procgen/results/results_cp',
+                         result_dir='/home/francelico/dev/PhD/procgen/results/results',
                          keep_original_split=False)
 
     sys.exit(0)
