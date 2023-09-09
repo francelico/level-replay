@@ -469,6 +469,7 @@ def create_full_exp_file(exp_dir: str,
 
     with open(os.path.join(exp_dir, filename), "w") as exp_file:
         exp_file.write("\n".join(exp_strings))
+        exp_file.write("\n")
 
     return exp_strings
 
@@ -576,16 +577,16 @@ if __name__ == "__main__":
     # --instance_predictor --instance_predictor_hidden_size=-1 --level_replay_secondary_strategy=instance_pred_log_prob
     # --level_replay_secondary_strategy_fraction_start=0.5 --checkpoint --log_dir=~/procgen/level-replay/results
 
-    parser.add_argument(
-        "--level_replay_secondary_temperature_SWEEP",
-        type=str,
-        default='0.1,0.5,1.0,2.0',
-        help="SWEEP PARAM: Level replay scoring strategy")
-    parser.add_argument(
-        "--level_replay_secondary_strategy_coef_end_SWEEP",
-        type=str,
-        default='0.25,0.5,1.0',
-        help="SWEEP PARAM: Level replay coefficient balancing primary and secondary strategies, end value")
+    # parser.add_argument(
+    #     "--level_replay_secondary_temperature_SWEEP",
+    #     type=str,
+    #     default='0.1,0.5,1.0,2.0',
+    #     help="SWEEP PARAM: Level replay scoring strategy")
+    # parser.add_argument(
+    #     "--level_replay_secondary_strategy_coef_end_SWEEP",
+    #     type=str,
+    #     default='0.25,0.5,1.0',
+    #     help="SWEEP PARAM: Level replay coefficient balancing primary and secondary strategies, end value")
     parser.add_argument(
         '--env_name_SWEEP',
         type=str,
@@ -595,20 +596,20 @@ if __name__ == "__main__":
     parser.add_argument(
         '--seed_SWEEP',
         type=str,
-        default='8,88,888,8888',
+        default='8,88,888,8888,88888',
         help='SWEEP PARAM: random seed')
 
     args = parser.parse_args()
     # rename_pids(os.path.expandvars(os.path.expanduser('~/procgen/level-replay/results')))
     # rename_baserun_pids(os.path.expandvars(os.path.expanduser('~/procgen/level-replay/results')))
-    # create_full_exp_file(os.path.expandvars(os.path.expanduser('~/procgen/level-replay/slurm')),
-    #                 'sweep_experiment.txt',
-    #                 args.__dict__,
-    #                 setup_xpid=True,
-    #                 setup_logdir=True,
-    #                 bootstrap=True)
-    create_todo_exp_file(input_exp_file='sweep_experiment.txt',
-                         to_server=True,
+    create_full_exp_file(os.path.expandvars(os.path.expanduser('~/dev/PhD/procgen/level-replay/slurm')),
+                    'ab-log_prob.txt',
+                    args.__dict__,
+                    setup_xpid=True,
+                    setup_logdir=True,
+                    bootstrap=False)
+    create_todo_exp_file(input_exp_file='ab-log_prob.txt',
+                         to_server=False,
                          result_dir='/home/francelico/dev/PhD/procgen/results/results',
                          keep_original_split=False)
 

@@ -106,8 +106,9 @@ class FileWriter:
         if not os.path.exists(self.basepath):
             if self.no_setup:
                 raise FileNotFoundError("Log directory not found in read-only mode: %s" % self.basepath)
-            self._logger.info("Creating log directory: %s", self.basepath)
-            os.makedirs(self.basepath, exist_ok=True)
+            else:
+                self._logger.info("Creating log directory: %s", self.basepath)
+                os.makedirs(self.basepath, exist_ok=True)
         else:
             self._logger.info("Found log directory: %s", self.basepath)
 
