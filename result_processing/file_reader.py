@@ -5,10 +5,12 @@ import os
 import pandas as pd
 import logging
 
+from level_replay.utils import DotDict
+
 
 class LogReader:
 
-    def __init__(self, run_name, root_dir, output_dir, rolling_window=100, seeds=None, ignore_extra=False):
+    def __init__(self, run_name, root_dir, output_dir, rolling_window=10, seeds=None, ignore_extra=False):
 
         self.run_name = run_name
         self.root_dir = root_dir
@@ -19,8 +21,10 @@ class LogReader:
             self.pid_dirs = [p for p in self.pid_dirs if not p.endswith('_extra')]
         self.pid_filewriters = [FileWriter(rootdir=str(p), no_setup=True, symlink_to_latest=False) for p in self.pid_dirs]
         self.pid_filewriters = [fw for fw in self.pid_filewriters if fw.completed]
+        self.num_updates = int(self.args.num_env_steps) // self.args.num_steps // self.args.num_processes
 
         self._logger = logging.getLogger(self.__class__.__name__)
+        self._logger.setLevel(logging.WARNING)
         if self._logger.hasHandlers():
             self._logger.handlers.clear()
 
@@ -36,7 +40,10 @@ class LogReader:
                 return
 
         labels_to_smooth = ['train_eval:mean_episode_return', 'test:mean_episode_return', 'train:mean_episode_return',
-                            'instance_pred_accuracy_train', 'instance_pred_prob_train', 'instance_pred_entropy_train']
+                            'instance_pred_accuracy_train', 'instance_pred_prob_train', 'instance_pred_entropy_train',
+                            'instance_pred_accuracy', 'instance_pred_prob', 'instance_pred_entropy',
+                            'instance_pred_accuracy_stale', 'instance_pred_prob_stale', 'instance_pred_entropy_stale',
+                            'mutual_information', 'mutual_information_stale', 'generalisation_gap', 'mean_agent_return']
         logs = [self._fix_logging_inconsistencies(fw) for fw in self.pid_filewriters]
 
         for i, log in enumerate(logs):
@@ -50,19 +57,12 @@ class LogReader:
         self.secondary_strategy_fraction_end = self.args['level_replay_secondary_strategy_coef_update_fraction'] if \
             'level_replay_secondary_strategy_coef_update_fraction' in self.args else \
             self.args['level_replay_secondary_strategy_fraction_end']
-        self.num_updates = int(logs[0]['# _tick'][-1])
         self.env_steps = logs[0]['step']
 
         for i, pid_filewriter in enumerate(self.pid_filewriters):
             assert self.env_name == pid_filewriter.metadata['args']['env_name'], "All pids must have the same env_name"
             assert self.level_replay_strategy == pid_filewriter.metadata['args']['level_replay_strategy'], \
                 "All pids must have the same level_replay_strategy"
-            if self.num_updates != logs[i]['# _tick'][-1]:
-                self._logger.warning(f"Num updare mismatch: {logs[i]['# _tick'][-1]} != {self.num_updates} "
-                f" in {pid_filewriter.basepath}")
-                if np.abs(self.num_updates - logs[i]['# _tick'][-1]) > 1:
-                    raise ValueError(f"Number of update mismatch in {pid_filewriter.basepath} in too high "
-                                     f"({np.abs(self.num_updates - logs[i]['# _tick'][-1])})")
 
             # assert np.all(self.env_steps == logs[i]['step']), "All pids must have the same env_steps"
 
@@ -76,8 +76,100 @@ class LogReader:
                 self._logger.warning("Fixing logging inconsistency in %s at tick %d", filewriter.basepath, tick)
                 logs['# _tick'] = np.arange(len(ticks))
                 break
-
+        if self.num_updates != logs['# _tick'][-1] + 1:
+            self._logger.warning(f"Num updare mismatch: {logs['# _tick'][-1]} != {self.num_updates} "
+                                 f" in {filewriter.basepath}")
+            if np.abs(self.num_updates - (logs['# _tick'][-1] + 1)) > 1:
+                raise ValueError(f"Number of update mismatch in {filewriter.basepath} in too high "
+                                 f"({np.abs(self.num_updates - logs['# _tick'][-1]) + 1})")
+            else:
+                for key in logs.keys():
+                    new_array = np.zeros(self.num_updates).astype(logs[key].dtype)
+                    new_array[:len(logs[key])] = logs[key]
+                    logs[key] = new_array
+                    logs[key][-1] = logs[key][-2]
+                logs['# _tick'][-1] = logs['# _tick'][-1] + 1
+        logs['total_student_grad_updates'] = logs['# _tick']
+        logs['generalisation_gap'] = logs['train_eval:mean_episode_return'] - logs['test:mean_episode_return']
+        logs['mean_agent_return'] = logs['train:mean_episode_return']
+        logs['mutual_information'] = self.compute_mutual_information(filewriter, False)
+        logs['mutual_information_stale'] = self.compute_mutual_information(filewriter, True)
+        logs['instance_pred_accuracy_stale'] = np.nanmean(self.get_stat_with_stale_updates(filewriter.instance_pred_accuracy), axis=-1)
+        logs['instance_pred_prob_stale'] = np.nanmean(self.get_stat_with_stale_updates(filewriter.instance_pred_prob), axis=-1)
+        logs['instance_pred_entropy_stale'] = np.nanmean(self.get_stat_with_stale_updates(filewriter.instance_pred_entropy), axis=-1)
+        logs['instance_pred_accuracy'] = np.nanmean(self._fix_missing_stats(filewriter.instance_pred_accuracy), axis=-1)
+        logs['instance_pred_prob'] = np.nanmean(self._fix_missing_stats(filewriter.instance_pred_prob), axis=-1)
+        logs['instance_pred_entropy'] = np.nanmean(self._fix_missing_stats(filewriter.instance_pred_entropy), axis=-1)
+        logs['num_seeds_buffer'] = np.ones_like(logs['# _tick']) * self.args.num_train_seeds #Not sure if needed
+        logs['total_dgps'] = logs['num_seeds_buffer']
+        logs['generalisation_bound'] = np.sqrt(2 * logs['mutual_information'] / logs['total_dgps'])
+        logs['generalisation_bound_stale'] = np.sqrt(2 * logs['mutual_information_stale'] / logs['total_dgps'])
         return logs
+
+    def _fix_missing_stats(self, data):
+        for i, s in enumerate(data):
+            if np.isnan(s).all():
+                self._logger.warning("Fixing nan at tick %d", i)
+                if i > 0:
+                    data[i] = data[i - 1]
+                else:
+                    data[i] = data[i + 1]
+        return data
+
+    # A more accurate but slower approach would be to fit a linear predictor to recover weights, but this is good enough
+    # low bias but high variance
+    def get_rollout_weightings(self, fw, use_stale_updates=False, normalize=True):
+        sampled = ~np.isnan(fw.level_train_returns)
+        for i, s in enumerate(sampled):
+            if not s.any():
+                self._logger.warning("Found missing log in %s at update %d", fw.basepath, i)
+                if i > 0:
+                    sampled[i] = sampled[i - 1]
+                else:
+                    sampled[i] = sampled[i + 1]
+        shifted_w = fw.level_weights.copy()
+        shifted_w[1:] = shifted_w[:-1]
+        shifted_w[0] = 1 / shifted_w.shape[1]
+        ws = np.zeros_like(shifted_w)
+        if use_stale_updates:
+            for i, s in enumerate(sampled):
+                if i > 0:
+                    ws[i] = ws[i-1]
+
+                ws[i][s] = shifted_w[i][s]
+        else:
+            ws[sampled] = shifted_w[sampled]
+
+        if normalize:
+            ws = ws / ws.sum(axis=-1).reshape(-1, 1)
+        return ws
+
+    def get_stat_with_stale_updates(self, stat):
+        new_stat = stat.copy()
+        sampled = ~np.isnan(stat)
+        for i, s in enumerate(sampled):
+            if not s.any():
+                self._logger.warning("Found missing log at update %d", i)
+                if i > 0:
+                    s = sampled[i - 1]
+                else:
+                    s = sampled[i + 1]
+            if i > 0:
+                new_stat[i] = new_stat[i-1]
+            new_stat[i][s] = stat[i][s]
+        return new_stat
+
+    def compute_mutual_information(self, fw, use_stale_updates=False):
+        pi = self.get_rollout_weightings(fw, use_stale_updates=use_stale_updates, normalize=True)
+        with np.errstate(divide='ignore'):
+            hpi = -(pi * np.nan_to_num(np.log(pi), neginf=0)).sum(axis=-1)
+        logpred = fw.instance_pred_log_prob
+        if use_stale_updates:
+            logpred = self.get_stat_with_stale_updates(logpred)
+        rollout_buffer_size = fw.metadata['args']['num_processes'] * fw.metadata['args']['num_steps']
+        mi = hpi - np.nansum(pi * logpred, axis=-1) / rollout_buffer_size
+        return mi
+
 
     @property
     def logs(self)->pd.DataFrame:
@@ -143,8 +235,8 @@ class LogReader:
         return value
 
     @property
-    def args(self)->dict:
-        return self.pid_filewriters[0].metadata['args']
+    def args(self)->DotDict:
+        return DotDict(self.pid_filewriters[0].metadata['args'])
 
     @property
     def final_test_eval_scores(self)->np.ndarray:

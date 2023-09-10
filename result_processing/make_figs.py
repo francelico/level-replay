@@ -10,6 +10,8 @@ import seaborn as sns
 from torchvision import utils as vutils
 import sys
 import re
+from rliable import metrics, plot_utils
+from rliable import library as rly
 
 from result_processing.util import dedupe_legend_labels_and_handles
 import result_processing.file_reader as reader
@@ -99,6 +101,11 @@ def parse_args():
         type=str,
         default=None,
         help='seeds to pick in each directory.')
+    parser.add_argument(
+        '--rolling_window',
+        type=int,
+        default=100,
+        help='seeds to pick in each directory.')
 
     return parser.parse_args()
 
@@ -166,6 +173,7 @@ def mean_normalised_scores(log_readers, baseline='random'):
     mean_scores = []
     std_scores = []
     for logr in log_readers:
+        logr.normalised_scores = logr.final_test_eval_scores / BASELINE_SCORES[logr.env_name][baseline][0]
         mean_scores.append(logr.final_test_eval_mean / BASELINE_SCORES[logr.env_name][baseline][0])
         std_scores.append(logr.final_test_eval_std / BASELINE_SCORES[logr.env_name][baseline][0])
     mean_scores = np.array(mean_scores)
@@ -173,12 +181,87 @@ def mean_normalised_scores(log_readers, baseline='random'):
     std = 1/len(std_scores) * np.sqrt((std_scores**2).sum())
     return mean_scores.mean(), std
 
-def mean_precision(log_readers):
-    raise NotImplementedError
+def compute_mean_stats(log_readers, stat_keys=None, update=-1):
 
-def mean_generalisation_gap(log_readers):
-    raise NotImplementedError
+    if stat_keys is None:
+        stat_keys = ['instance_pred_accuracy_train', 'instance_pred_prob_train', 'instance_pred_entropy_train',
+                    'instance_pred_accuracy', 'instance_pred_prob', 'instance_pred_entropy',
+                    'instance_pred_accuracy_stale', 'instance_pred_prob_stale', 'instance_pred_entropy_stale',
+                    'mutual_information', 'mutual_information_stale', 'generalisation_gap']
+    if update == -1:
+        update = log_readers[0].num_updates
+        assert all([logr.num_updates == update for logr in log_readers])
+    stats = {}
+    for stat in stat_keys:
+        mean_stats = []
+        stat_mavg = f"{stat}_mavg"
+        for logr in log_readers:
+            ids = np.argsort(np.abs(logr.logs['total_student_grad_updates'] - update))[:len(logr.pid_dirs)]
+            mean_stats.append(logr.logs[stat_mavg][ids].mean())
+        mean_stats = np.array(mean_stats)
+        stats[stat] = (mean_stats.mean(), mean_stats.std())
+    return stats
 
+def plot_rliable(log_readers_dict, baseline='random', **kwargs):
+
+    aggregate_func = lambda x: np.array([
+        metrics.aggregate_median(x),
+        metrics.aggregate_iqm(x),
+        metrics.aggregate_mean(x),
+        metrics.aggregate_optimality_gap(x)])
+
+    labels = {key : i for i, key in enumerate(log_readers_dict.keys())} #TODO: temp
+    colors = None
+
+    metric_scores = {}
+    for key, log_readers in log_readers_dict.items():
+        norm_scores = []
+        for logr in log_readers:
+            if hasattr(logr, 'normalised_scores'):
+                norm_scores.append(logr.normalised_scores)
+            else:
+                norm_scores.append(logr.final_test_eval_scores / BASELINE_SCORES[logr.env_name][baseline][0])
+        norm_scores = np.array(norm_scores)
+        metric_scores[labels[key]] = norm_scores.T
+
+    aggregate_scores, aggregate_score_cis = rly.get_interval_estimates(
+        metric_scores, aggregate_func, reps=50000)
+
+    algorithm_pairs = {'0,1': (metric_scores[0], metric_scores[1])} #TODO
+    average_probabilities, average_prob_cis = \
+        rly.get_interval_estimates(algorithm_pairs, metrics.probability_of_improvement, reps=2000)
+
+
+    #TODO: tune
+    # plot_utils.plot_interval_estimates(
+    #     aggregate_scores, aggregate_score_cis,
+    #     metric_names=['Median', 'IQM', 'Mean', 'Optimality Gap'],
+    #     algorithms=list(metric_scores.keys()),
+    #     colors=colors,
+    #     xlabel=f'',
+    #     subfigure_width=4.0,
+    #     row_height=2,
+    #     left=0.15,
+    #     xlabel_y_coordinate=0.1,
+    #     **kwargs)
+    fig, ax = plot_utils.plot_interval_estimates(
+        aggregate_scores, aggregate_score_cis,
+        metric_names=['Median', 'IQM', 'Mean', 'Optimality Gap'],
+        algorithms=list(metric_scores.keys()),
+        colors=colors,
+        xlabel=f'',
+        subfigure_width=4.0,
+        row_height=0.25,
+        left=0.15,
+        xlabel_y_coordinate=0.1,
+        **kwargs)
+    plt.savefig(os.path.join(args.output_path, f"procgen_score_aggregates.{PLOT_FILE_FORMAT}"))
+    plt.close(fig)
+
+    fig, ax = plot_utils.plot_probability_of_improvement(average_probabilities, average_prob_cis)
+    plt.savefig(os.path.join(args.output_path, f"procgen_prob_of_improvement.{PLOT_FILE_FORMAT}"))
+    plt.close(fig)
+    return aggregate_scores, aggregate_score_cis, average_probabilities, average_prob_cis
 
 if __name__ == '__main__':
 
@@ -192,7 +275,7 @@ if __name__ == '__main__':
     all_run_names = [name for name in os.listdir(args.base_path) if os.path.isdir(os.path.join(args.base_path, name))]
     ignore_patterns = args.ignore_runs.split(',')
     run_names = [name for name in all_run_names if not any([re.search(pattern, name) for pattern in ignore_patterns])]
-    log_readers = [reader.LogReader(run_name, args.base_path, args.output_path, seeds=seeds, ignore_extra=args.ignore_extra_pids) for run_name in run_names]
+    log_readers = [reader.LogReader(run_name, args.base_path, args.output_path, rolling_window=args.rolling_window, seeds=seeds, ignore_extra=args.ignore_extra_pids) for run_name in run_names]
     log_readers = [log_reader for log_reader in log_readers if log_reader.completed]
 
     temp = defaultdict(list)
@@ -214,9 +297,11 @@ if __name__ == '__main__':
     stats = {}
     for run_id in log_readers:
         scn = mean_normalised_scores(log_readers[run_id])
-        st = {'norm_test_sc_mean': scn[0],
-              'norm_test_sc_std': scn[1], }
+        st = {'normalised_score': scn}
+        st.update(compute_mean_stats(log_readers[run_id]))
         stats[run_id] = DotDict(st)
+
+    plot_rliable(log_readers)
 
     # Careful, number of seeds not homogeneous across runs
 
