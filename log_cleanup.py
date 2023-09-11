@@ -522,8 +522,6 @@ def create_todo_exp_file(input_exp_file=None,
             args = parser.parse_args(shlex.split(string)).__dict__
             log_dirname = os.path.basename(args['log_dir'])
             pid_dir = os.path.join(result_dir, log_dirname, args['xpid'])
-            new_logdir = os.path.join(result_dir_out[i], log_dirname)
-            args['log_dir'] = new_logdir
             new_string = args2string(args)
             if os.path.exists(pid_dir):
                 print(f"Found {pid_dir}")
@@ -538,14 +536,24 @@ def create_todo_exp_file(input_exp_file=None,
         with open(os.path.join(slurm_exp_dir, output_exp_file[0]), 'w') as f:
             for exp_file in todo_strings:
                 for line in todo_strings[exp_file]:
-                    f.write(line + '\n')
+                    args = parser.parse_args(shlex.split(line)).__dict__
+                    log_dirname = os.path.basename(args['log_dir'])
+                    new_logdir = os.path.join(result_dir_out[i], log_dirname)
+                    args['log_dir'] = new_logdir
+                    new_string = args2string(args)
+                    f.write(new_string + '\n')
     else:
         # split experiments across servers
         if keep_original_split:
             for i, exp_file in enumerate(input_exp_file):
                 with open(os.path.join(slurm_exp_dir, output_exp_file[i]), 'w') as f:
                     for line in todo_strings[exp_file]:
-                        f.write(line + '\n')
+                        args = parser.parse_args(shlex.split(line)).__dict__
+                        log_dirname = os.path.basename(args['log_dir'])
+                        new_logdir = os.path.join(result_dir_out[i], log_dirname)
+                        args['log_dir'] = new_logdir
+                        new_string = args2string(args)
+                        f.write(new_string + '\n')
                 if verbose:
                     print(f"Server {server_config[i]['server']} gets {len(todo_strings[exp_file])} experiments")
         else:
@@ -562,7 +570,12 @@ def create_todo_exp_file(input_exp_file=None,
                     end = start + int(conf['split_weight'] / z * num_exp)
                 with open(os.path.join(slurm_exp_dir, output_exp_file[i]), 'w') as f:
                     for line in all_exp_strings[start:end]:
-                        f.write(line + '\n')
+                        args = parser.parse_args(shlex.split(line)).__dict__
+                        log_dirname = os.path.basename(args['log_dir'])
+                        new_logdir = os.path.join(result_dir_out[i], log_dirname)
+                        args['log_dir'] = new_logdir
+                        new_string = args2string(args)
+                        f.write(new_string + '\n')
                 if verbose:
                     print(f"Server {conf['server']} gets {end - start} experiments")
                 start = end
@@ -599,19 +612,24 @@ if __name__ == "__main__":
         default='8,88,888,8888,88888',
         help='SWEEP PARAM: random seed')
 
+    MILA_PATH = '~/procgen/level-replay/results'
+    LOCAL_PATH = '/home/francelico/dev/PhD/procgen/results/test2'
+
     args = parser.parse_args()
-    # rename_pids(os.path.expandvars(os.path.expanduser('~/procgen/level-replay/results')))
-    # rename_baserun_pids(os.path.expandvars(os.path.expanduser('~/procgen/level-replay/results')))
-    create_full_exp_file(os.path.expandvars(os.path.expanduser('~/dev/PhD/procgen/level-replay/slurm')),
-                    'ab-log_prob.txt',
-                    args.__dict__,
-                    setup_xpid=True,
-                    setup_logdir=True,
-                    bootstrap=False)
-    create_todo_exp_file(input_exp_file='ab-log_prob.txt',
-                         to_server=False,
-                         result_dir='/home/francelico/dev/PhD/procgen/results/results',
-                         keep_original_split=False)
+    # CAREFUL THIS IS BROKEN, ONLY USE IN A SEPARATE DIRECTORY TO CREATE BASERUNS. NON BASE RUNS WILL BE DELETED.
+    # just search for _bkup and delete them in the original result directory.
+    rename_pids(os.path.expandvars(os.path.expanduser(LOCAL_PATH)))
+    rename_baserun_pids(os.path.expandvars(os.path.expanduser(LOCAL_PATH)))
+    # create_full_exp_file(os.path.expandvars(os.path.expanduser('~/dev/PhD/procgen/level-replay/slurm')),
+    #                 'ab-log_prob.txt',
+    #                 args.__dict__,
+    #                 setup_xpid=True,
+    #                 setup_logdir=True,
+    #                 bootstrap=False)
+    # create_todo_exp_file(input_exp_file='bs-valuel1_experiment.txt,bs-random_experiment.txt,ab-log_prob.txt',
+    #                      to_server=False,
+    #                      result_dir='/home/francelico/dev/PhD/procgen/results/results',
+    #                      keep_original_split=False)
 
     sys.exit(0)
 
