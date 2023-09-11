@@ -314,13 +314,15 @@ def set_logdir(args, base_dir=None):
 
 def set_bootstrap_dir(args):
 
+    fs = 0.5
+
     bootstrap_log_dir = f"e-{args['env_name']}_" \
                         f"s1-{args['level_replay_strategy']}_" \
-                        f"fs-{args['level_replay_secondary_strategy_fraction_start']}_baserun"
+                        f"fs-{fs}_baserun"
 
     bootstrap_pid =     f"e-{args['env_name']}_" \
                         f"s1-{args['level_replay_strategy']}_" \
-                        f"fs-{args['level_replay_secondary_strategy_fraction_start']}_" \
+                        f"fs-{fs}_" \
                         f"s-{args['seed']}"
 
     bootstrap_dir = os.path.join(bootstrap_log_dir, bootstrap_pid)
@@ -618,18 +620,18 @@ if __name__ == "__main__":
     args = parser.parse_args()
     # CAREFUL THIS IS BROKEN, ONLY USE IN A SEPARATE DIRECTORY TO CREATE BASERUNS. NON BASE RUNS WILL BE DELETED.
     # just search for _bkup and delete them in the original result directory.
-    rename_pids(os.path.expandvars(os.path.expanduser(LOCAL_PATH)))
-    rename_baserun_pids(os.path.expandvars(os.path.expanduser(LOCAL_PATH)))
+    # rename_pids(os.path.expandvars(os.path.expanduser(LOCAL_PATH)))
+    # rename_baserun_pids(os.path.expandvars(os.path.expanduser(LOCAL_PATH)))
     # create_full_exp_file(os.path.expandvars(os.path.expanduser('~/dev/PhD/procgen/level-replay/slurm')),
     #                 'ab-log_prob.txt',
     #                 args.__dict__,
     #                 setup_xpid=True,
     #                 setup_logdir=True,
     #                 bootstrap=False)
-    # create_todo_exp_file(input_exp_file='bs-valuel1_experiment.txt,bs-random_experiment.txt,ab-log_prob.txt',
-    #                      to_server=False,
-    #                      result_dir='/home/francelico/dev/PhD/procgen/results/results',
-    #                      keep_original_split=False)
+    create_todo_exp_file(input_exp_file='bs-valuel1_experiment.txt,bs-random_experiment.txt,ab-log_prob.txt',
+                         to_server=True,
+                         result_dir='/home/francelico/dev/PhD/procgen/results/results',
+                         keep_original_split=False)
 
     sys.exit(0)
 
