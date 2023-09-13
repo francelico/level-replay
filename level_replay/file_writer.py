@@ -485,49 +485,63 @@ class FileWriter:
             reader = csv.reader(levelweightsfile)
             lines = list(reader)
         header = lines[0]
-        self._level_weights = np.array([[float(val) for val in row] for row in lines[1:]])
+        lines = lines[1:]
+        if lines:
+            self._level_weights = np.array([[float(val) for val in row] for row in lines])
 
         # Returns a numpy array of value loss of dim [num_updates, len(self.seeds)]
         with open(self.paths["level_value_loss"], "r") as levelvaluelossfile:
             reader = csv.reader(levelvaluelossfile)
             lines = list(reader)
         header = lines[0]
-        self._level_value_loss = np.array([[float(val) for val in row] for row in lines[1:]])
+        lines = lines[1:]
+        if lines:
+            self._level_value_loss = np.array([[float(val) for val in row] for row in lines])
 
         # Returns a numpy array of instance value loss of dim [num_updates, len(self.seeds)]
         with open(self.paths["level_instance_value_loss"], "r") as levelinstancevaluelossfile:
             reader = csv.reader(levelinstancevaluelossfile)
             lines = list(reader)
         header = lines[0]
-        self._level_instance_value_loss = np.array([[float(val) for val in row] for row in lines[1:]])
+        lines = lines[1:]
+        if lines:
+            self._level_instance_value_loss = np.array([[float(val) for val in row] for row in lines])
 
         # Returns a numpy array of returns of dim [num_updates, len(self.seeds)]
         with open(self.paths["level_returns"], "r") as levelreturnsfile:
             reader = csv.reader(levelreturnsfile)
             lines = list(reader)
         header = lines[0]
-        self._level_train_returns = np.array([[float(val) for val in row] for row in lines[1:]])
+        lines = lines[1:]
+        if lines:
+            self._level_train_returns = np.array([[float(val) for val in row] for row in lines])
 
         # Returns a numpy array of instance pred entropy of dim [num_updates, len(self.seeds)]
         with open(self.paths["instance_pred_entropy"], "r") as instancepredentropyfile:
             reader = csv.reader(instancepredentropyfile)
             lines = list(reader)
         header = lines[0]
-        self._instance_pred_entropy = np.array([[float(val) for val in row] for row in lines[1:]])
+        lines = lines[1:]
+        if lines:
+            self._instance_pred_entropy = np.array([[float(val) for val in row] for row in lines])
 
         # Returns a numpy array of instance pred accuracy of dim [num_updates, len(self.seeds)]
         with open(self.paths["instance_pred_accuracy"], "r") as instancepredaccuracyfile:
             reader = csv.reader(instancepredaccuracyfile)
             lines = list(reader)
         header = lines[0]
-        self._instance_pred_accuracy = np.array([[float(val) for val in row] for row in lines[1:]])
+        lines = lines[1:]
+        if lines:
+            self._instance_pred_accuracy = np.array([[float(val) for val in row] for row in lines])
 
         # Returns a numpy array of instance pred precision of dim [num_updates, len(self.seeds)]
         with open(self.paths["instance_pred_prob"], "r") as instancepredprobfile:
             reader = csv.reader(instancepredprobfile)
             lines = list(reader)
         header = lines[0]
-        self._instance_pred_prob = np.array([[float(val) for val in row] for row in lines[1:]])
+        lines = lines[1:]
+        if lines:
+            self._instance_pred_prob = np.array([[float(val) for val in row] for row in lines])
 
         # Returns a numpy array of instance pred precision of dim [num_updates, len(self.seeds)]
         with open(self.paths["instance_pred_log_prob"], "r") as instancepredlogprobfile:
@@ -536,33 +550,41 @@ class FileWriter:
         #NO HEADER DUE TO BUG
         if len(lines) == len(self._instance_pred_prob) + 1:
             lines = lines[1:]
-        self._instance_pred_log_prob = np.array([[float(val) for val in row] for row in lines])
+        if lines:
+            self._instance_pred_log_prob = np.array([[float(val) for val in row] for row in lines])
 
         # Returns a numpy array of instance pred precision of dim [num_updates, len(self.seeds)]
         with open(self.paths["instance_pred_precision"], "r") as instancepredprecisionfile:
             reader = csv.reader(instancepredprecisionfile)
             lines = list(reader)
         header = lines[0]
-        self._instance_pred_precision = np.array([[float(val) for val in row] for row in lines[1:]])
+        lines = lines[1:]
+        if lines:
+            self._instance_pred_precision = np.array([[float(val) for val in row] for row in lines])
 
         # Returns a numpy array of instance pred precision of dim [num_updates, len(self.seeds)]
         with open(self.paths["instance_pred_recall"], "r") as instancepredrecallfile:
             reader = csv.reader(instancepredrecallfile)
             lines = list(reader)
         header = lines[0]
-        self._instance_pred_recall = np.array([[float(val) for val in row] for row in lines[1:]])
+        lines = lines[1:]
+        if lines:
+            self._instance_pred_recall = np.array([[float(val) for val in row] for row in lines])
 
         # Returns a numpy array of instance pred precision of dim [num_updates, len(self.seeds)]
         with open(self.paths["instance_pred_f1"], "r") as instancepredf1file:
             reader = csv.reader(instancepredf1file)
             lines = list(reader)
         header = lines[0]
-        self._instance_pred_f1 = np.array([[float(val) for val in row] for row in lines[1:]])
+        lines = lines[1:]
+        if lines:
+            self._instance_pred_f1 = np.array([[float(val) for val in row] for row in lines])
 
         with open(self.paths["final_test_eval"], "r") as finaltestfile:
             reader = csv.DictReader(finaltestfile)
             lines = list(reader)
-        self._final_test_eval = {key: float(val) for key, val in lines[0].items()}
+        if lines:
+            self._final_test_eval = {key: float(val) for key, val in lines[0].items()}
 
     @property
     def logs(self) -> Dict[str, np.ndarray]:
