@@ -50,6 +50,8 @@ class LogReader:
             for label in labels_to_smooth:
                 data = pd.Series(log[label])
                 log[f'{label}_mavg'] = data.rolling(rolling_window).mean().to_numpy()
+                if label == 'generalisation_gap':
+                    log[f'{label}_mavg'][-1] = log['train_eval:mean_episode_return_mavg'][-1] - self.pid_filewriters[i].final_test_eval['mean_episode_return']
 
         self.env_name = self.args['env_name']
         self.level_replay_strategy = self.args['level_replay_strategy']
@@ -90,10 +92,13 @@ class LogReader:
                     logs[key][-1] = logs[key][-2]
                 logs['# _tick'][-1] = logs['# _tick'][-1] + 1
         logs['total_student_grad_updates'] = logs['# _tick']
-        logs['generalisation_gap'] = logs['train_eval:mean_episode_return'] - logs['test:mean_episode_return']
+        logs['generalisation_gap'] = logs['train_eval:mean_episode_return'] - logs['test:mean_episode_return'] #TODO: at minus -1 should use the final eval value.
+        logs['generalisation_gap'][-1] = logs['train_eval:mean_episode_return'][-1] - filewriter.final_test_eval['mean_episode_return']
         logs['mean_agent_return'] = logs['train:mean_episode_return']
         logs['mutual_information'] = self.compute_mutual_information(filewriter, False)
         logs['mutual_information_stale'] = self.compute_mutual_information(filewriter, True)
+        logs['mutual_information_u'] = self.compute_mutual_information(filewriter, False, uniform=True)
+        logs['mutual_information_u_stale'] = self.compute_mutual_information(filewriter, True, uniform=True)
         logs['instance_pred_accuracy_stale'] = np.nanmean(self.get_stat_with_stale_updates(filewriter.instance_pred_accuracy), axis=-1)
         logs['instance_pred_prob_stale'] = np.nanmean(self.get_stat_with_stale_updates(filewriter.instance_pred_prob), axis=-1)
         logs['instance_pred_entropy_stale'] = np.nanmean(self.get_stat_with_stale_updates(filewriter.instance_pred_entropy), axis=-1)
@@ -104,6 +109,8 @@ class LogReader:
         logs['total_dgps'] = logs['num_seeds_buffer']
         logs['generalisation_bound'] = np.sqrt(2 * logs['mutual_information'] / logs['total_dgps'])
         logs['generalisation_bound_stale'] = np.sqrt(2 * logs['mutual_information_stale'] / logs['total_dgps'])
+        logs['generalisation_bound_u'] = np.sqrt(2 * logs['mutual_information_u'] / logs['total_dgps'])
+        logs['generalisation_bound_u_stale'] = np.sqrt(2 * logs['mutual_information_u_stale'] / logs['total_dgps'])
         return logs
 
     def _fix_missing_stats(self, data):
@@ -159,15 +166,18 @@ class LogReader:
             new_stat[i][s] = stat[i][s]
         return new_stat
 
-    def compute_mutual_information(self, fw, use_stale_updates=False):
-        pi = self.get_rollout_weightings(fw, use_stale_updates=use_stale_updates, normalize=True)
+    def compute_mutual_information(self, fw, use_stale_updates=False, uniform=False):
+        if uniform:
+            pi = np.ones_like(fw.level_train_returns) / fw.level_train_returns.shape[-1]
+        else:
+            pi = self.get_rollout_weightings(fw, use_stale_updates=use_stale_updates, normalize=True)
         with np.errstate(divide='ignore'):
             hpi = -(pi * np.nan_to_num(np.log(pi), neginf=0)).sum(axis=-1)
         logpred = fw.instance_pred_log_prob
         if use_stale_updates:
             logpred = self.get_stat_with_stale_updates(logpred)
         rollout_buffer_size = fw.metadata['args']['num_processes'] * fw.metadata['args']['num_steps']
-        mi = hpi - np.nansum(pi * logpred, axis=-1) / rollout_buffer_size
+        mi = hpi + np.nansum(pi * logpred, axis=-1) / rollout_buffer_size
         return mi
 
 
@@ -240,7 +250,7 @@ class LogReader:
 
     @property
     def final_test_eval_scores(self)->np.ndarray:
-        return np.array([float(fw.final_test_eval[0]['mean_episode_return']) for fw in self.pid_filewriters])
+        return np.array([float(fw.final_test_eval['mean_episode_return']) for fw in self.pid_filewriters])
 
     @property
     def final_test_eval_mean(self):

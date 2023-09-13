@@ -562,7 +562,7 @@ class FileWriter:
         with open(self.paths["final_test_eval"], "r") as finaltestfile:
             reader = csv.DictReader(finaltestfile)
             lines = list(reader)
-        self._final_test_eval = lines
+        self._final_test_eval = {key: float(val) for key, val in lines[0].items()}
 
     @property
     def logs(self) -> Dict[str, np.ndarray]:
