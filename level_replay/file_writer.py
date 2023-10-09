@@ -14,6 +14,8 @@ import time
 from typing import Dict, List, Any
 import numpy as np
 
+from level_replay.utils import DotDict
+
 
 def gather_metadata() -> Dict:
     date_start = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
@@ -637,3 +639,7 @@ class FileWriter:
     @property
     def final_test_eval(self) -> List[Dict[str, Any]]:
         return self._final_test_eval
+
+    @property
+    def args(self)->DotDict:
+        return DotDict(self.metadata['args'])
