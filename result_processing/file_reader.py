@@ -41,7 +41,7 @@ class LogReader:
 
         labels_to_smooth = ['train_eval:mean_episode_return', 'test:mean_episode_return', 'train:mean_episode_return',
                             'instance_pred_accuracy_train', 'instance_pred_prob_train', 'instance_pred_entropy_train',
-                            'instance_pred_accuracy', 'instance_pred_prob', 'instance_pred_entropy',
+                            'instance_pred_accuracy', 'instance_pred_prob', 'instance_pred_entropy', 'level_value_loss',
                             'instance_pred_accuracy_stale', 'instance_pred_prob_stale', 'instance_pred_entropy_stale',
                             'mutual_information', 'mutual_information_stale', 'generalisation_gap', 'mean_agent_return']
         logs = [self._fix_logging_inconsistencies(fw) for fw in self.pid_filewriters]
@@ -105,6 +105,7 @@ class LogReader:
         logs['instance_pred_accuracy'] = np.nanmean(self._fix_missing_stats(filewriter.instance_pred_accuracy), axis=-1)
         logs['instance_pred_prob'] = np.nanmean(self._fix_missing_stats(filewriter.instance_pred_prob), axis=-1)
         logs['instance_pred_entropy'] = np.nanmean(self._fix_missing_stats(filewriter.instance_pred_entropy), axis=-1)
+        logs['level_value_loss'] = np.nanmean(self._fix_missing_stats(filewriter.level_value_loss), axis=-1)
         logs['num_seeds_buffer'] = np.ones_like(logs['# _tick']) * self.args.num_train_seeds #Not sure if needed
         logs['total_dgps'] = logs['num_seeds_buffer']
         logs['generalisation_bound'] = np.sqrt(2 * logs['mutual_information'] / logs['total_dgps'])
