@@ -287,12 +287,13 @@ def set_xpid(args):
 
     xpid = f"e-{args['env_name']}_" \
             f"s1-{args['level_replay_strategy']}_" \
-            f"s2-{args['level_replay_secondary_strategy']}_" \
-            f"bf-{args['level_replay_secondary_strategy_coef_end']}_" \
-            f"l2-{args['level_replay_secondary_temperature']}_" \
-            f"fs-{args['level_replay_secondary_strategy_fraction_start']}_" \
-            f"fe-{args['level_replay_secondary_strategy_fraction_end']}_" \
+            f"lvl-{args['num_train_seeds']}_" \
             f"s-{args['seed']}"
+    # f"s2-{args['level_replay_secondary_strategy']}_" \
+    # f"bf-{args['level_replay_secondary_strategy_coef_end']}_" \
+    # f"l2-{args['level_replay_secondary_temperature']}_" \
+    # f"fs-{args['level_replay_secondary_strategy_fraction_start']}_" \
+    # f"fe-{args['level_replay_secondary_strategy_fraction_end']}_" \
     return xpid
 
 
@@ -303,12 +304,13 @@ def set_logdir(args, base_dir=None):
     logdir = os.path.join(base_dir,
                           f"e-{args['env_name']}_"
                           f"s1-{args['level_replay_strategy']}_"
-                          f"s2-{args['level_replay_secondary_strategy']}_"
-                          f"bf-{args['level_replay_secondary_strategy_coef_end']}_"
-                          f"l2-{args['level_replay_secondary_temperature']}_"
-                          f"fs-{args['level_replay_secondary_strategy_fraction_start']}_"
-                          f"fe-{args['level_replay_secondary_strategy_fraction_end']}"
+                          f"lvl-{args['num_train_seeds']}"
                           )
+    # f"s2-{args['level_replay_secondary_strategy']}_"
+    # f"bf-{args['level_replay_secondary_strategy_coef_end']}_"
+    # f"l2-{args['level_replay_secondary_temperature']}_"
+    # f"fs-{args['level_replay_secondary_strategy_fraction_start']}_"
+    # f"fe-{args['level_replay_secondary_strategy_fraction_end']}"
     return logdir
 
 
@@ -592,22 +594,22 @@ if __name__ == "__main__":
     # --instance_predictor --instance_predictor_hidden_size=-1 --level_replay_secondary_strategy=instance_pred_log_prob
     # --level_replay_secondary_strategy_fraction_start=0.5 --checkpoint --log_dir=~/procgen/level-replay/results
 
-    # parser.add_argument(
-    #     "--level_replay_secondary_temperature_SWEEP",
-    #     type=str,
-    #     default='0.1,0.5,1.0,2.0',
-    #     help="SWEEP PARAM: Level replay scoring strategy")
-    # parser.add_argument(
-    #     "--level_replay_secondary_strategy_coef_end_SWEEP",
-    #     type=str,
-    #     default='0.25,0.5,1.0',
-    #     help="SWEEP PARAM: Level replay coefficient balancing primary and secondary strategies, end value")
+    parser.add_argument(
+        '--num_train_seeds_SWEEP',
+        type=str,
+        default='500,1000,2000',
+    )
     parser.add_argument(
         '--env_name_SWEEP',
         type=str,
-        default='bigfish,heist,climber,caveflyer,jumper,fruitbot,plunder,coinrun,ninja,leaper,'
-                'maze,miner,dodgeball,starpilot,chaser,bossfight',
+        default='miner',
         help='SWEEP PARAM: environment to train on')
+    # parser.add_argument(
+    #     '--env_name_SWEEP',
+    #     type=str,
+    #     default='bigfish,heist,climber,caveflyer,jumper,fruitbot,plunder,coinrun,ninja,leaper,'
+    #             'maze,miner,dodgeball,starpilot,chaser,bossfight',
+    #     help='SWEEP PARAM: environment to train on')
     parser.add_argument(
         '--seed_SWEEP',
         type=str,
@@ -622,16 +624,16 @@ if __name__ == "__main__":
     # just search for _bkup and delete them in the original result directory.
     # rename_pids(os.path.expandvars(os.path.expanduser(LOCAL_PATH)))
     # rename_baserun_pids(os.path.expandvars(os.path.expanduser(LOCAL_PATH)))
-    # create_full_exp_file(os.path.expandvars(os.path.expanduser('~/dev/PhD/procgen/level-replay/slurm')),
-    #                 'ab-log_prob.txt',
-    #                 args.__dict__,
-    #                 setup_xpid=True,
-    #                 setup_logdir=True,
-    #                 bootstrap=False)
-    create_todo_exp_file(input_exp_file='bs-valuel1_experiment.txt,bs-random_experiment.txt,ab-log_prob.txt',
-                         to_server=True,
-                         result_dir='/home/francelico/dev/PhD/procgen/results/results',
-                         keep_original_split=False)
+    create_full_exp_file(os.path.expandvars(os.path.expanduser('~/dev/PhD/procgen/level-replay/slurm')),
+                    'exp-numlvl-miner-random.txt',
+                    args.__dict__,
+                    setup_xpid=True,
+                    setup_logdir=True,
+                    bootstrap=False)
+    # create_todo_exp_file(input_exp_file='bs-valuel1_experiment.txt,bs-random_experiment.txt,ab-log_prob.txt',
+    #                      to_server=True,
+    #                      result_dir='/home/francelico/dev/PhD/procgen/results/results',
+    #                      keep_original_split=False)
 
     sys.exit(0)
 

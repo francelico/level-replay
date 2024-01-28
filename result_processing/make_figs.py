@@ -223,7 +223,8 @@ def compute_stats(log_readers, stat_keys=None, update=-1, **kwargs):
                     'instance_pred_accuracy_stale', 'instance_pred_prob_stale', 'instance_pred_entropy_stale',
                      'level_value_loss',
                     'mutual_information', 'mutual_information_stale', 'generalisation_bound', 'generalisation_bound_stale',
-                     'mutual_information_u', 'mutual_information_u_stale', 'generalisation_bound_u', 'generalisation_bound_u_stale',]
+                     'mutual_information_u', 'mutual_information_u_stale', 'generalisation_bound_u', 'generalisation_bound_u_stale',
+                     'overgen_gap', 'overgen_gap_stale']
     if update == -1:
         update = log_readers[0].num_updates
         assert all([logr.num_updates == update for logr in log_readers])
@@ -249,6 +250,34 @@ def compute_stats(log_readers, stat_keys=None, update=-1, **kwargs):
 
 def plot_rliable(log_readers_dict, baseline='random', **kwargs):
 
+    # Investigating which game to pick for overgen gap extra exp.
+    # for algo, log_readers in log_readers_dict.items():
+    #     for logr in log_readers:
+    #         env_name = logr.env_name
+    #         if env_name in ['miner']:
+    #             env_idx = ENV_NAMES.index(env_name)
+    #             logs = logr.logs
+    #             sns.lineplot(x='step', y='overgen_gap_stale', data=logs, label=f'{algo}').set(title=env_name, xlabel='step', ylabel='overgengap (stale)')
+    # plt.show()
+    # scores_test_m = {}
+    # scores_train_by_test_m = {}
+    # scores_train_by_train_m = {}
+    # gen_gaps_m = {}
+    # gen_gaps_no_norm_m = {}
+    # overgen_gaps_m_s = {}
+    # overgen_gaps_m = {}
+    # MI_m = {}
+    # for method in gen_gaps:
+    #     scores_test_m[method] = test_scores_norm_by_test[method].mean(axis=0)
+    #     scores_train_by_test_m[method] = train_scores_norm_by_test[method].mean(axis=0)
+    #     scores_train_by_train_m[method] = train_scores_norm_by_train[method].mean(axis=0)
+    #     gen_gaps_m[method] = gen_gaps[method].mean(axis=0)
+    #     gen_gaps_no_norm_m[method] = gen_gaps_no_norm[method].mean(axis=0)
+    #     overgen_gaps_m_s[method] = overgen_gaps_stale[method].mean(axis=0)
+    #     overgen_gaps_m[method] = overgen_gaps[method].mean(axis=0)
+    #     MI_m[method] = mutual_infos_u_stale[method].mean(axis=0)
+
+
     labels = LABELS
     qck_lbl_getter = {
         'vl1-MI': LABELS['s1-value_l1_s2-instance_pred_log_prob_bf-0.25_l2-0.1_fs-0.5_fe-1.0'],
@@ -259,8 +288,9 @@ def plot_rliable(log_readers_dict, baseline='random', **kwargs):
     }
     colors = None
 
-    metric_scores = {}
-    metric_scores_train = {}
+    test_scores_norm_by_test = {}
+    train_scores_norm_by_test = {}
+    train_scores_norm_by_train = {}
     vl = {}
     norm_vl = {}
     gen_gaps = {}
@@ -279,11 +309,14 @@ def plot_rliable(log_readers_dict, baseline='random', **kwargs):
     mutual_infos_u_stale = {}
     generalisation_bounds_u = {}
     generalisation_bounds_u_stale = {}
+    overgen_gaps = {}
+    overgen_gaps_stale = {}
     for key, log_readers in log_readers_dict.items():
         if key not in labels:
             continue
-        norm_scores = [[] for _ in range(len(ENV_NAMES))]
-        norm_train_scores = [[] for _ in range(len(ENV_NAMES))]
+        test_score_norm_by_test = [[] for _ in range(len(ENV_NAMES))]
+        train_score_norm_by_test = [[] for _ in range(len(ENV_NAMES))]
+        train_score_norm_by_train = [[] for _ in range(len(ENV_NAMES))]
         value_l1 = [[] for _ in range(len(ENV_NAMES))]
         norm_value_l1 = [[] for _ in range(len(ENV_NAMES))]
         gen_gap = [[] for _ in range(len(ENV_NAMES))]
@@ -302,23 +335,26 @@ def plot_rliable(log_readers_dict, baseline='random', **kwargs):
         mutual_info_u_stale = [[] for _ in range(len(ENV_NAMES))]
         generalisation_bound_u = [[] for _ in range(len(ENV_NAMES))]
         generalisation_bound_u_stale = [[] for _ in range(len(ENV_NAMES))]
+        overgen_gap = [[] for _ in range(len(ENV_NAMES))]
+        overgen_gap_stale = [[] for _ in range(len(ENV_NAMES))]
         for logr in log_readers:
             env_name = logr.env_name
             env_idx = ENV_NAMES.index(env_name)
             if hasattr(logr, 'normalised_scores'):
-                norm_scores[env_idx] = logr.normalised_scores
+                test_score_norm_by_test[env_idx] = logr.normalised_scores
             else:
-                norm_scores[env_idx] = logr.final_test_eval_scores / BASELINE_SCORES[env_name][baseline][0]
+                test_score_norm_by_test[env_idx] = logr.final_test_eval_scores / BASELINE_SCORES[env_name][baseline][0]
             if hasattr(logr, 'train_set_normalised_scores_train'):
-                norm_train_scores[env_idx] = logr.train_set_normalised_scores_train
+                train_score_norm_by_train[env_idx] = logr.train_set_normalised_scores_train
             else:
-                norm_train_scores[env_idx] = logr.final_train_eval_scores \
+                train_score_norm_by_train[env_idx] = logr.final_train_eval_scores \
                                              / BASELINE_SCORES[env_name][f'{baseline}_train_set'][0]
             if hasattr(logr, 'normalised_value_l1'):
                 norm_value_l1[env_idx] = logr.normalised_value_l1
             else:
                 norm_value_l1[env_idx] = logr.final_value_l1 / BASELINE_SCORES[env_name][baseline][0]
             value_l1[env_idx] = logr.value_l1
+            train_score_norm_by_test[env_idx] = logr.normalised_scores_train
             gen_gap[env_idx] = logr.normalised_scores_train - logr.normalised_scores
             gen_gap_no_norm[env_idx] = logr.final_train_eval_scores - logr.final_test_eval_scores
             accuracy[env_idx] = logr.final_stats.instance_pred_accuracy
@@ -335,8 +371,11 @@ def plot_rliable(log_readers_dict, baseline='random', **kwargs):
             mutual_info_u_stale[env_idx] = logr.final_stats.mutual_information_u_stale
             generalisation_bound_u[env_idx] = logr.final_stats.generalisation_bound_u
             generalisation_bound_u_stale[env_idx] = logr.final_stats.generalisation_bound_u_stale
-        metric_scores[labels[key]] = np.array(norm_scores).T
-        metric_scores_train[labels[key]] = np.array(norm_train_scores).T
+            overgen_gap[env_idx] = logr.final_stats.overgen_gap
+            overgen_gap_stale[env_idx] = logr.final_stats.overgen_gap_stale
+        test_scores_norm_by_test[labels[key]] = np.array(test_score_norm_by_test).T
+        train_scores_norm_by_test[labels[key]] = np.array(train_score_norm_by_test).T
+        train_scores_norm_by_train[labels[key]] = np.array(train_score_norm_by_train).T
         vl[labels[key]] = np.array(value_l1).T
         norm_vl[labels[key]] = np.array(norm_value_l1).T
         gen_gaps[labels[key]] = np.array(gen_gap).T
@@ -355,6 +394,8 @@ def plot_rliable(log_readers_dict, baseline='random', **kwargs):
         mutual_infos_u_stale[labels[key]] = np.array(mutual_info_u_stale).T
         generalisation_bounds_u[labels[key]] = np.array(generalisation_bound_u).T
         generalisation_bounds_u_stale[labels[key]] = np.array(generalisation_bound_u_stale).T
+        overgen_gaps[labels[key]] = np.array(overgen_gap).T
+        overgen_gaps_stale[labels[key]] = np.array(overgen_gap_stale).T
 
     def compute_correlations(v1, v2):
         lin_coef = np.corrcoef(v1, v2)
@@ -391,11 +432,11 @@ def plot_rliable(log_readers_dict, baseline='random', **kwargs):
         # metrics.aggregate_optimality_gap(x)
     ])
 
-    aggregate_train_scores, aggregate_train_score_cis = rly.get_interval_estimates(
-        metric_scores_train, aggregate_func, reps=50000)
+    aggregate_train_scores_norm_by_train, aggregate_train_score_norm_by_train_cis = rly.get_interval_estimates(
+        train_scores_norm_by_train, aggregate_func, reps=50000)
 
-    aggregate_scores, aggregate_score_cis = rly.get_interval_estimates(
-        metric_scores, aggregate_func, reps=50000)
+    aggregate_test_scores_norm_by_test, aggregate_test_scores_norm_by_test_cis = rly.get_interval_estimates(
+        test_scores_norm_by_test, aggregate_func, reps=50000)
 
     aggregate_gaps, aggregate_gaps_cis = rly.get_interval_estimates(
         gen_gaps, aggregate_func, reps=50000)
@@ -405,10 +446,10 @@ def plot_rliable(log_readers_dict, baseline='random', **kwargs):
     make_algo_pairs = lambda id_pairs, scores: {f'{qck_lbl_getter[pair[0]]}~{qck_lbl_getter[pair[1]]}':
                                                 (scores[qck_lbl_getter[pair[0]]], scores[qck_lbl_getter[pair[1]]])
                                                 for pair in id_pairs}
-    aggregate_scores_j = {key: join_agg_scores(aggregate_train_scores[key], aggregate_scores[key]) for key in aggregate_train_scores}
+    aggregate_scores_j = {key: join_agg_scores(aggregate_train_scores_norm_by_train[key], test_scores_norm_by_test[key]) for key in aggregate_train_scores_norm_by_train}
     aggregate_scores_j = {key: join_agg_scores(aggregate_scores_j[key], aggregate_gaps[key]) for key in aggregate_scores_j}
 
-    aggregate_score_cis_j = {key: join_agg_cis(aggregate_train_score_cis[key], aggregate_score_cis[key]) for key in aggregate_score_cis}
+    aggregate_score_cis_j = {key: join_agg_cis(aggregate_train_score_norm_by_train_cis[key], aggregate_test_scores_norm_by_test_cis[key]) for key in aggregate_train_score_norm_by_train_cis}
     aggregate_score_cis_j = {key: join_agg_cis(aggregate_score_cis_j[key], aggregate_gaps_cis[key]) for key in aggregate_score_cis_j}
 
     pairs = [
@@ -418,7 +459,7 @@ def plot_rliable(log_readers_dict, baseline='random', **kwargs):
         ("MI", "U"),
     ]
 
-    algorithm_pairs = make_algo_pairs(pairs, metric_scores)
+    algorithm_pairs = make_algo_pairs(pairs, test_scores_norm_by_test)
     algorithm_pairs_gap = make_algo_pairs(pairs, gen_gaps)
 
     average_probabilities, average_prob_cis = \
@@ -502,8 +543,6 @@ def plot_rliable(log_readers_dict, baseline='random', **kwargs):
                                         xlabel='P(X $>$ Y), Normalised Score')
     save_probablity_of_improvement_plot("procgen_prob_of_improvement_gap", average_probabilities_gap, average_prob_cis_gap,
                                         xlabel='P(X $>$ Y), Normalised Generalisation Gap')
-
-    return aggregate_scores, aggregate_score_cis, average_probabilities, average_prob_cis
 
 if __name__ == '__main__':
 
