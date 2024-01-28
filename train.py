@@ -341,6 +341,7 @@ def train(args, seeds):
                 logging.info(f"\nLast update: Evaluating on {args.final_num_test_seeds} test levels...\n  ")
                 final_eval_episode_rewards, final_eval_seeds = evaluate(args, actor_critic, args.final_num_test_seeds, device,
                                                                         start_level=args.num_train_seeds)
+                final_train_eval_episode_rewards, final_train_eval_seeds = evaluate(args, actor_critic, args.num_final_train_eval_episodes, device, seeds=level_sampler.seeds)
 
                 mean_final_eval_episode_rewards = np.mean(final_eval_episode_rewards)
                 median_final_eval_episode_rewards = np.median(final_eval_episode_rewards)
@@ -350,6 +351,8 @@ def train(args, seeds):
                     'mean_episode_return': mean_final_eval_episode_rewards,
                     'median_episode_return': median_final_eval_episode_rewards
                 })
+
+                plogger.log_final_train_eval(final_train_eval_episode_rewards, final_train_eval_seeds)
 
             plogger.log(stats)
             if args.verbose:

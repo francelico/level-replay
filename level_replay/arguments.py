@@ -32,6 +32,11 @@ parser.add_argument(
     default=10,
     help='how many evaluation episodes to complete')
 parser.add_argument(
+    '--num_final_train_eval_episodes',
+    type=int,
+    default=2000,
+    help='how many evaluation episodes to complete at the end of training')
+parser.add_argument(
     '--num_train_eval_steps',
     type=int,
     default=2048,

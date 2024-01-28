@@ -99,6 +99,8 @@ class LogReader:
         logs['mutual_information_stale'] = self.compute_mutual_information(filewriter, True)
         logs['mutual_information_u'] = self.compute_mutual_information(filewriter, False, uniform=True)
         logs['mutual_information_u_stale'] = self.compute_mutual_information(filewriter, True, uniform=True)
+        logs['overgen_gap'] = self.compute_overgen_gap(filewriter, False)
+        logs['overgen_gap_stale'] = self.compute_overgen_gap(filewriter, True)
         logs['instance_pred_accuracy_stale'] = np.nanmean(self.get_stat_with_stale_updates(filewriter.instance_pred_accuracy), axis=-1)
         logs['instance_pred_prob_stale'] = np.nanmean(self.get_stat_with_stale_updates(filewriter.instance_pred_prob), axis=-1)
         logs['instance_pred_entropy_stale'] = np.nanmean(self.get_stat_with_stale_updates(filewriter.instance_pred_entropy), axis=-1)
@@ -181,6 +183,18 @@ class LogReader:
         mi = hpi + np.nansum(pi * logpred, axis=-1) / rollout_buffer_size
         return mi
 
+    def compute_overgen_gap(self, fw, use_stale_updates=False):
+        pi = self.get_rollout_weightings(fw, use_stale_updates=use_stale_updates, normalize=True)
+        if use_stale_updates:
+            sampled = ~np.isnan(fw.level_train_returns)
+            scores = np.zeros_like(fw.level_train_returns)
+            for i, s in enumerate(sampled):
+                if i > 0:
+                    scores[i] = scores[i-1]
+                scores[i][s] = fw.level_train_returns[i][s]
+        else:
+            scores = fw.level_train_returns
+        return np.nansum(pi * scores, axis=-1) - np.nanmean(scores, axis=-1)
 
     @property
     def logs(self)->pd.DataFrame:

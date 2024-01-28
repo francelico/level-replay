@@ -146,7 +146,8 @@ class FileWriter:
             instance_pred_precision="{base}/instance_pred_precision.csv".format(base=self.basepath),
             instance_pred_recall="{base}/instance_pred_recall.csv".format(base=self.basepath),
             instance_pred_f1="{base}/instance_pred_f1.csv".format(base=self.basepath),
-            final_test_eval="{base}/final_test_eval.csv".format(base=self.basepath)
+            final_test_eval="{base}/final_test_eval.csv".format(base=self.basepath),
+            final_train_eval="{base}/final_train_eval.csv".format(base=self.basepath)
         )
 
         self._logger.info("Saving messages to %s", self.paths["msg"])
@@ -193,6 +194,8 @@ class FileWriter:
         self._levelweightswriter = csv.writer(self._levelweightsfile)
         self._finaltestfile = open(self.paths["final_test_eval"], "a")
         self._finaltestwriter = csv.DictWriter(self._finaltestfile, fieldnames=self.final_test_eval_fieldnames)
+        self._finaltrainevalfile = open(self.paths["final_train_eval"], "a")
+        self._finaltrainevalwriter = csv.DictWriter(self._finaltrainevalfile, fieldnames=seeds)
         self._levelvaluelossfile = open(self.paths["level_value_loss"], "a")
         self._levelvaluelosswriter = csv.writer(self._levelvaluelossfile)
         self._levelinstancevaluelossfile = open(self.paths["level_instance_value_loss"], "a")
@@ -309,6 +312,10 @@ class FileWriter:
             self._finaltestwriter.writeheader()
             self._finaltestfile.flush()
 
+        if self._finaltrainevalfile.tell() == 0:
+            self._finaltrainevalfile.write("# %s\n" % ",".join(self.seeds))
+            self._finaltrainevalfile.flush()
+
     def log(self, to_log: Dict, tick: int = None, verbose: bool = False) -> None:
         if tick is not None:
             raise NotImplementedError
@@ -384,6 +391,21 @@ class FileWriter:
     def log_final_test_eval(self, to_log):
         self._finaltestwriter.writerow(to_log)
         self._finaltestfile.flush()
+
+    def log_final_train_eval(self, episode_rewards, seeds):
+        # Create a dictionary grouping the rewards by seed
+        rewards_by_seed = {}
+        for seed, reward in zip(seeds, episode_rewards):
+            if seed not in rewards_by_seed:
+                rewards_by_seed[seed] = []
+            rewards_by_seed[seed].append(reward)
+
+        # average the rewards for each seed
+        average_rewards_by_seed = {seed: np.mean(rewards) for seed, rewards in rewards_by_seed.items()}
+
+        # log the average rewards for each seed
+        self._finaltrainevalwriter.writerow(average_rewards_by_seed)
+        self._finaltrainevalfile.flush()
 
     def close(self, successful: bool = True) -> None:
         self.metadata["date_end"] = datetime.datetime.now().strftime(
@@ -582,6 +604,14 @@ class FileWriter:
         if lines:
             self._instance_pred_f1 = np.array([[float(val) for val in row] for row in lines])
 
+        with open(self.paths["final_train_eval"], "r") as finaltrainfile:
+            reader = csv.reader(finaltrainfile)
+            lines = list(reader)
+        header = lines[0]
+        lines = lines[1:]
+        if lines:
+            self._final_train_eval_by_seed = np.array([[float(val) for val in row] for row in lines])
+
         with open(self.paths["final_test_eval"], "r") as finaltestfile:
             reader = csv.DictReader(finaltestfile)
             lines = list(reader)
@@ -635,6 +665,10 @@ class FileWriter:
     @property
     def instance_pred_f1(self) -> np.ndarray:
         return self._instance_pred_f1
+
+    @property
+    def final_train_eval_by_seed(self) -> np.ndarray:
+        return self._final_train_eval_by_seed
 
     @property
     def final_test_eval(self) -> List[Dict[str, Any]]:

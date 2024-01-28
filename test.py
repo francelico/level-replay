@@ -50,7 +50,8 @@ def evaluate(
         num_seeds = num_episodes
         seeds = np.random.randint(start_level, 1e7, size=num_seeds)
     else:
-        level_sampler_args = {'strategy': 'random'}
+        level_sampler_args = {'strategy': 'sequential'}
+        start_level = int(seeds[0])
 
     eval_envs, level_sampler = make_lr_venv(
         num_envs=num_processes, env_name=args.env_name,
