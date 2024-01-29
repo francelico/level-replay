@@ -5,7 +5,7 @@ experiment_lists=("$@")
 JOBNAME="procgen"
 MAXJOBS=9
 JOBCOUNT=0
-batch_script=job_mila_${partition}.sh
+batch_script=job_${partition}.sh
 
 cd ~/procgen/level-replay/slurm
 SLEEP_TIME=1
