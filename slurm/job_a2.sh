@@ -66,10 +66,6 @@ echo "Job started: $dt"
 # Make script bail out after first error
 set -e
 
-echo "Loading modules"
-module load cuda/11.1/cudnn
-module load anaconda/3
-
 # Activate your conda environment
 CONDA_ENV_NAME=procgen-plr
 echo "Activating conda environment: ${CONDA_ENV_NAME}"
