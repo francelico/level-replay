@@ -66,6 +66,8 @@ echo "Job started: $dt"
 # Make script bail out after first error
 set -e
 
+# Explicitly activate conda
+source ~/miniconda3/etc/profile.d/conda.sh
 # Activate your conda environment
 CONDA_ENV_NAME=procgen-plr
 echo "Activating conda environment: ${CONDA_ENV_NAME}"
