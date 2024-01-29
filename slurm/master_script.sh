@@ -3,7 +3,7 @@ shift 1
 experiment_lists=("$@")
 
 JOBNAME="procgen"
-MAXJOBS=5
+MAXJOBS=4
 JOBCOUNT=0
 batch_script=job_${partition}.sh
 
