@@ -28,6 +28,7 @@ class LogReader:
         if self._logger.hasHandlers():
             self._logger.handlers.clear()
 
+        self.rolling_window = rolling_window
         self._get_logs(rolling_window=rolling_window, seeds=seeds)
 
     def _get_logs(self, rolling_window=10, seeds=None):
@@ -43,7 +44,7 @@ class LogReader:
                             'instance_pred_accuracy_train', 'instance_pred_prob_train', 'instance_pred_entropy_train',
                             'instance_pred_accuracy', 'instance_pred_prob', 'instance_pred_entropy', 'level_value_loss',
                             'instance_pred_accuracy_stale', 'instance_pred_prob_stale', 'instance_pred_entropy_stale',
-                            'mutual_information', 'mutual_information_stale', 'generalisation_gap', 'mean_agent_return']
+                            'mutual_information', 'generalisation_gap', 'mean_agent_return']
         logs = [self._fix_logging_inconsistencies(fw) for fw in self.pid_filewriters]
 
         for i, log in enumerate(logs):
@@ -99,8 +100,8 @@ class LogReader:
         logs['mutual_information_stale'] = self.compute_mutual_information(filewriter, True)
         logs['mutual_information_u'] = self.compute_mutual_information(filewriter, False, uniform=True)
         logs['mutual_information_u_stale'] = self.compute_mutual_information(filewriter, True, uniform=True)
-        logs['overgen_gap'] = self.compute_overgen_gap(filewriter, False)
-        logs['overgen_gap_stale'] = self.compute_overgen_gap(filewriter, True)
+        logs['shift_gap'] = self.compute_shift_gap(filewriter, False)
+        logs['shift_gap_stale'] = self.compute_shift_gap(filewriter, True)
         logs['instance_pred_accuracy_stale'] = np.nanmean(self.get_stat_with_stale_updates(filewriter.instance_pred_accuracy), axis=-1)
         logs['instance_pred_prob_stale'] = np.nanmean(self.get_stat_with_stale_updates(filewriter.instance_pred_prob), axis=-1)
         logs['instance_pred_entropy_stale'] = np.nanmean(self.get_stat_with_stale_updates(filewriter.instance_pred_entropy), axis=-1)
@@ -170,20 +171,13 @@ class LogReader:
         return new_stat
 
     def compute_mutual_information(self, fw, use_stale_updates=False, uniform=False):
-        if uniform:
-            pi = np.ones_like(fw.level_train_returns) / fw.level_train_returns.shape[-1]
-        else:
-            pi = self.get_rollout_weightings(fw, use_stale_updates=use_stale_updates, normalize=True)
-        with np.errstate(divide='ignore'):
-            hpi = -(pi * np.nan_to_num(np.log(pi), neginf=0)).sum(axis=-1)
-        logpred = fw.instance_pred_log_prob
-        if use_stale_updates:
-            logpred = self.get_stat_with_stale_updates(logpred)
-        rollout_buffer_size = fw.metadata['args']['num_processes'] * fw.metadata['args']['num_steps']
-        mi = hpi + np.nansum(pi * logpred, axis=-1) / rollout_buffer_size
-        return mi
+        pi = np.ones_like(fw.level_train_returns) / fw.level_train_returns.shape[-1]
+        hpi = -(pi * np.log(pi)).sum(axis=-1)
+        cross_entropy = fw.logs['instance_pred_loss_train']
+        mut = hpi - cross_entropy
+        return mut
 
-    def compute_overgen_gap(self, fw, use_stale_updates=False):
+    def compute_shift_gap(self, fw, use_stale_updates=False):
         pi = self.get_rollout_weightings(fw, use_stale_updates=use_stale_updates, normalize=True)
         if use_stale_updates:
             sampled = ~np.isnan(fw.level_train_returns)
@@ -274,6 +268,41 @@ class LogReader:
     @property
     def final_test_eval_std(self):
         return self.final_test_eval_scores.std()
+
+    @property
+    def final_train_eval_scores(self)->np.ndarray:
+        scores_by_seed = [fw.final_train_eval_by_seed for fw in self.pid_filewriters]
+        if all(isinstance(s, np.ndarray) for s in scores_by_seed):
+            return np.array([np.nanmean(s) for s in scores_by_seed])
+        else:
+            update = self.num_updates
+            all_updates = self.logs['total_student_grad_updates'].to_numpy()
+            ids = np.argsort(np.abs(all_updates - update))[:len(self.pid_dirs)]
+            return self.logs['train_eval:mean_episode_return_mavg'][ids].to_numpy()
+
+    @property
+    def final_train_eval_mean(self):
+        return self.final_train_eval_scores.mean()
+
+    @property
+    def final_train_eval_std(self):
+        return self.final_train_eval_scores.std()
+
+    @property
+    def final_gen_gap_pids(self):
+        return self.final_train_eval_scores - self.final_test_eval_scores
+
+    @property
+    def run_average_shift_gap_pids(self):
+        return np.array([fw.logs['shift_gap'].mean() for fw in self.pid_filewriters])
+
+    @property
+    def final_shift_gap_pids(self):
+        return np.array([fw.logs['shift_gap'][-self.rolling_window:].mean() for fw in self.pid_filewriters])
+
+    @property
+    def final_mutual_information_pids(self):
+        return np.array([fw.logs['mutual_information'][-1] for fw in self.pid_filewriters])
 
     @property
     def completed(self):

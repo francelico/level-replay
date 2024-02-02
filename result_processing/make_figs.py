@@ -46,11 +46,11 @@ PLOT_FILE_FORMAT = 'pdf'
 
 # {batch_name: {kw: val}}
 PLOTTING = {
-    's1-value_l1_s2-random_bf-0.25_l2-1.0_fs-0.5_fe-1.0': {'label': '$S=S^V, P_{S_2}=\mathcal{U}$'},
-    's1-value_l1_s2-instance_pred_log_prob_bf-0.25_l2-0.1_fs-0.5_fe-1.0': {'label': '$S=S^V, S_2=S^{\mathrm{MI}}$'},
     's1-value_l1_s2-off_bf-0.0_l2-1.0_fs-0.0_fe-1.0': {'label': '$S=S^V$'},
     's1-random_s2-off_bf-0.0_l2-1.0_fs-0.0_fe-1.0': {'label': '$P_S=\mathcal{U}$'},
     's1-instance_pred_log_prob_s2-off_bf-0.0_l2-1.0_fs-0.0_fe-1.0': {'label': '$S=S^{\mathrm{MI}}$'},
+    's1-value_l1_s2-random_bf-0.25_l2-1.0_fs-0.5_fe-1.0': {'label': '$S=S^V, P_{S^\prime}=\mathcal{U}$'},
+    's1-value_l1_s2-instance_pred_log_prob_bf-0.25_l2-0.1_fs-0.5_fe-1.0': {'label': '$S=S^V, S^\prime=S^{\mathrm{MI}}$'},
     }
 # Set plotting colors from a seaborn palette.
 plotting_color_palette = sns.color_palette('colorblind', n_colors=len(PLOTTING))
@@ -168,21 +168,10 @@ BASELINE_SCORES = {
     'starpilot': {'random': (26.8, 1.5), 'plr': (27.9, 4.4)},
 }
 
-def get_final_train_scores_approximation(logr):
-    update = logr.num_updates
-    all_updates = logr.logs['total_student_grad_updates'].to_numpy()
-    ids = np.argsort(np.abs(all_updates - update))[:len(logr.pid_dirs)]
-    scores = logr.logs['train_eval:mean_episode_return_mavg'][ids].to_numpy()
-    logr.final_train_eval_scores = scores
-    logr.final_train_eval_mean = np.mean(scores)
-    logr.final_train_eval_std = np.std(scores)
-
 def update_baseline_scores(BASELINE_SCORES, logreaders, baseline='random'):
     for logr in logreaders:
         BASELINE_SCORES[logr.env_name][baseline] = (logr.final_test_eval_mean, logr.final_test_eval_std)
         if baseline == 'random':
-            if not hasattr(logr, 'final_train_eval_scores'):
-                get_final_train_scores_approximation(logr)
             BASELINE_SCORES[logr.env_name]['random_train_set'] = (logr.final_train_eval_mean, logr.final_train_eval_std)
 
 def mean_normalised_scores(log_readers, baseline='random', mode='test'):
@@ -198,8 +187,6 @@ def mean_normalised_scores(log_readers, baseline='random', mode='test'):
             update = logr.num_updates
             all_updates = logr.logs['total_student_grad_updates'].to_numpy()
             ids = np.argsort(np.abs(all_updates - update))[:len(logr.pid_dirs)]
-            if not hasattr(logr, 'final_train_eval_scores'):
-                get_final_train_scores_approximation(logr)
             scores = logr.final_train_eval_scores
             logr.normalised_scores_train = scores / BASELINE_SCORES[logr.env_name][baseline][0]
             logr.train_set_normalised_scores_train = \
@@ -224,7 +211,7 @@ def compute_stats(log_readers, stat_keys=None, update=-1, **kwargs):
                      'level_value_loss',
                     'mutual_information', 'mutual_information_stale', 'generalisation_bound', 'generalisation_bound_stale',
                      'mutual_information_u', 'mutual_information_u_stale', 'generalisation_bound_u', 'generalisation_bound_u_stale',
-                     'overgen_gap', 'overgen_gap_stale']
+                     'shift_gap', 'shift_gap_stale']
     if update == -1:
         update = log_readers[0].num_updates
         assert all([logr.num_updates == update for logr in log_readers])
@@ -250,34 +237,6 @@ def compute_stats(log_readers, stat_keys=None, update=-1, **kwargs):
 
 def plot_rliable(log_readers_dict, baseline='random', **kwargs):
 
-    # Investigating which game to pick for overgen gap extra exp.
-    # for algo, log_readers in log_readers_dict.items():
-    #     for logr in log_readers:
-    #         env_name = logr.env_name
-    #         if env_name in ['miner']:
-    #             env_idx = ENV_NAMES.index(env_name)
-    #             logs = logr.logs
-    #             sns.lineplot(x='step', y='overgen_gap_stale', data=logs, label=f'{algo}').set(title=env_name, xlabel='step', ylabel='overgengap (stale)')
-    # plt.show()
-    # scores_test_m = {}
-    # scores_train_by_test_m = {}
-    # scores_train_by_train_m = {}
-    # gen_gaps_m = {}
-    # gen_gaps_no_norm_m = {}
-    # overgen_gaps_m_s = {}
-    # overgen_gaps_m = {}
-    # MI_m = {}
-    # for method in gen_gaps:
-    #     scores_test_m[method] = test_scores_norm_by_test[method].mean(axis=0)
-    #     scores_train_by_test_m[method] = train_scores_norm_by_test[method].mean(axis=0)
-    #     scores_train_by_train_m[method] = train_scores_norm_by_train[method].mean(axis=0)
-    #     gen_gaps_m[method] = gen_gaps[method].mean(axis=0)
-    #     gen_gaps_no_norm_m[method] = gen_gaps_no_norm[method].mean(axis=0)
-    #     overgen_gaps_m_s[method] = overgen_gaps_stale[method].mean(axis=0)
-    #     overgen_gaps_m[method] = overgen_gaps[method].mean(axis=0)
-    #     MI_m[method] = mutual_infos_u_stale[method].mean(axis=0)
-
-
     labels = LABELS
     qck_lbl_getter = {
         'vl1-MI': LABELS['s1-value_l1_s2-instance_pred_log_prob_bf-0.25_l2-0.1_fs-0.5_fe-1.0'],
@@ -302,15 +261,12 @@ def plot_rliable(log_readers_dict, baseline='random', **kwargs):
     entropies = {}
     entropies_stale = {}
     mutual_infos = {}
-    mutual_infos_stale = {}
     generalisation_bounds = {}
     generalisation_bounds_stale = {}
-    mutual_infos_u = {}
-    mutual_infos_u_stale = {}
     generalisation_bounds_u = {}
     generalisation_bounds_u_stale = {}
-    overgen_gaps = {}
-    overgen_gaps_stale = {}
+    shift_gaps = {}
+    shift_gaps_stale = {}
     for key, log_readers in log_readers_dict.items():
         if key not in labels:
             continue
@@ -328,15 +284,12 @@ def plot_rliable(log_readers_dict, baseline='random', **kwargs):
         entropy = [[] for _ in range(len(ENV_NAMES))]
         entropy_stale = [[] for _ in range(len(ENV_NAMES))]
         mutual_info = [[] for _ in range(len(ENV_NAMES))]
-        mutual_info_stale = [[] for _ in range(len(ENV_NAMES))]
         generalisation_bound = [[] for _ in range(len(ENV_NAMES))]
         generalisation_bound_stale = [[] for _ in range(len(ENV_NAMES))]
-        mutual_info_u = [[] for _ in range(len(ENV_NAMES))]
-        mutual_info_u_stale = [[] for _ in range(len(ENV_NAMES))]
         generalisation_bound_u = [[] for _ in range(len(ENV_NAMES))]
         generalisation_bound_u_stale = [[] for _ in range(len(ENV_NAMES))]
-        overgen_gap = [[] for _ in range(len(ENV_NAMES))]
-        overgen_gap_stale = [[] for _ in range(len(ENV_NAMES))]
+        shift_gap = [[] for _ in range(len(ENV_NAMES))]
+        shift_gap_stale = [[] for _ in range(len(ENV_NAMES))]
         for logr in log_readers:
             env_name = logr.env_name
             env_idx = ENV_NAMES.index(env_name)
@@ -364,15 +317,12 @@ def plot_rliable(log_readers_dict, baseline='random', **kwargs):
             entropy[env_idx] = logr.final_stats.instance_pred_entropy
             entropy_stale[env_idx] = logr.final_stats.instance_pred_entropy_stale
             mutual_info[env_idx] = logr.final_stats.mutual_information
-            mutual_info_stale[env_idx] = logr.final_stats.mutual_information_stale
             generalisation_bound[env_idx] = logr.final_stats.generalisation_bound
             generalisation_bound_stale[env_idx] = logr.final_stats.generalisation_bound_stale
-            mutual_info_u[env_idx] = logr.final_stats.mutual_information_u
-            mutual_info_u_stale[env_idx] = logr.final_stats.mutual_information_u_stale
             generalisation_bound_u[env_idx] = logr.final_stats.generalisation_bound_u
             generalisation_bound_u_stale[env_idx] = logr.final_stats.generalisation_bound_u_stale
-            overgen_gap[env_idx] = logr.final_stats.overgen_gap
-            overgen_gap_stale[env_idx] = logr.final_stats.overgen_gap_stale
+            shift_gap[env_idx] = logr.final_stats.shift_gap
+            shift_gap_stale[env_idx] = logr.final_stats.shift_gap_stale
         test_scores_norm_by_test[labels[key]] = np.array(test_score_norm_by_test).T
         train_scores_norm_by_test[labels[key]] = np.array(train_score_norm_by_test).T
         train_scores_norm_by_train[labels[key]] = np.array(train_score_norm_by_train).T
@@ -387,15 +337,12 @@ def plot_rliable(log_readers_dict, baseline='random', **kwargs):
         entropies[labels[key]] = np.array(entropy).T
         entropies_stale[labels[key]] = np.array(entropy_stale).T
         mutual_infos[labels[key]] = np.array(mutual_info).T
-        mutual_infos_stale[labels[key]] = np.array(mutual_info_stale).T
         generalisation_bounds[labels[key]] = np.array(generalisation_bound).T
         generalisation_bounds_stale[labels[key]] = np.array(generalisation_bound_stale).T
-        mutual_infos_u[labels[key]] = np.array(mutual_info_u).T
-        mutual_infos_u_stale[labels[key]] = np.array(mutual_info_u_stale).T
         generalisation_bounds_u[labels[key]] = np.array(generalisation_bound_u).T
         generalisation_bounds_u_stale[labels[key]] = np.array(generalisation_bound_u_stale).T
-        overgen_gaps[labels[key]] = np.array(overgen_gap).T
-        overgen_gaps_stale[labels[key]] = np.array(overgen_gap_stale).T
+        shift_gaps[labels[key]] = np.array(shift_gap).T
+        shift_gaps_stale[labels[key]] = np.array(shift_gap_stale).T
 
     def compute_correlations(v1, v2):
         lin_coef = np.corrcoef(v1, v2)
@@ -406,7 +353,7 @@ def plot_rliable(log_readers_dict, baseline='random', **kwargs):
               f'kendall = {kendall}, kendall p ={kendall_p} \n')
         return lin_coef, dist_corr, kendall, kendall_p
 
-    all_mutual_infos = np.array([mutual_infos_u_stale[key] for key in mutual_infos_u_stale]).flatten()
+    all_mutual_infos = np.array([mutual_infos[key] for key in mutual_infos]).flatten()
     all_gen_gaps = np.array([gen_gaps_no_norm[key] for key in gen_gaps_no_norm]).flatten()
     all_gen_gaps_norm = np.array([gen_gaps[key] for key in gen_gaps]).flatten()
     all_vl = np.array([vl[key] for key in vl]).flatten()
@@ -432,25 +379,25 @@ def plot_rliable(log_readers_dict, baseline='random', **kwargs):
         # metrics.aggregate_optimality_gap(x)
     ])
 
-    aggregate_train_scores_norm_by_train, aggregate_train_score_norm_by_train_cis = rly.get_interval_estimates(
-        train_scores_norm_by_train, aggregate_func, reps=50000)
+    join_agg_scores = lambda x,y: np.concatenate([x, y], axis=0)
+    join_agg_cis = lambda x,y: np.concatenate([x, y], axis=-1)
+    join_agg = lambda sc_a, ci_a, sc_b, ci_b: ({key: join_agg_scores(sc_a[key], sc_b[key]) for key in sc_a},
+                                               {key: join_agg_cis(ci_a[key], ci_b[key]) for key in ci_a})
+    make_algo_pairs = lambda id_pairs, scores: {f'{qck_lbl_getter[pair[0]]}~{qck_lbl_getter[pair[1]]}':
+                                                (scores[qck_lbl_getter[pair[0]]], scores[qck_lbl_getter[pair[1]]])
+                                                for pair in id_pairs if (qck_lbl_getter[pair[0]] in scores and qck_lbl_getter[pair[1]] in scores)}
 
     aggregate_test_scores_norm_by_test, aggregate_test_scores_norm_by_test_cis = rly.get_interval_estimates(
         test_scores_norm_by_test, aggregate_func, reps=50000)
-
+    aggregate_mutual_infos, aggregate_mutual_infos_cis = rly.get_interval_estimates(mutual_infos, aggregate_func, reps=50000)
     aggregate_gaps, aggregate_gaps_cis = rly.get_interval_estimates(
         gen_gaps, aggregate_func, reps=50000)
+    aggregate_train_scores_norm_by_train, aggregate_train_score_norm_by_train_cis = rly.get_interval_estimates(
+        train_scores_norm_by_train, aggregate_func, reps=50000)
 
-    join_agg_scores = lambda x,y: np.concatenate([x, y], axis=0)
-    join_agg_cis = lambda x,y: np.concatenate([x, y], axis=-1)
-    make_algo_pairs = lambda id_pairs, scores: {f'{qck_lbl_getter[pair[0]]}~{qck_lbl_getter[pair[1]]}':
-                                                (scores[qck_lbl_getter[pair[0]]], scores[qck_lbl_getter[pair[1]]])
-                                                for pair in id_pairs}
-    aggregate_scores_j = {key: join_agg_scores(aggregate_train_scores_norm_by_train[key], test_scores_norm_by_test[key]) for key in aggregate_train_scores_norm_by_train}
-    aggregate_scores_j = {key: join_agg_scores(aggregate_scores_j[key], aggregate_gaps[key]) for key in aggregate_scores_j}
-
-    aggregate_score_cis_j = {key: join_agg_cis(aggregate_train_score_norm_by_train_cis[key], aggregate_test_scores_norm_by_test_cis[key]) for key in aggregate_train_score_norm_by_train_cis}
-    aggregate_score_cis_j = {key: join_agg_cis(aggregate_score_cis_j[key], aggregate_gaps_cis[key]) for key in aggregate_score_cis_j}
+    agg_sc, agg_ci = join_agg(aggregate_mutual_infos, aggregate_mutual_infos_cis, aggregate_gaps, aggregate_gaps_cis)
+    agg_sc, agg_ci = join_agg(agg_sc, agg_ci, aggregate_train_scores_norm_by_train, aggregate_train_score_norm_by_train_cis)
+    agg_sc, agg_ci = join_agg(agg_sc, agg_ci, aggregate_test_scores_norm_by_test, aggregate_test_scores_norm_by_test_cis)
 
     pairs = [
         ("vl1-U", "vl1"),
@@ -472,7 +419,7 @@ def plot_rliable(log_readers_dict, baseline='random', **kwargs):
 
     # SCATTER PLOT OF MI TO GEN GAP
     def save_scatter_plot(filename, x, y, xlabel, ylabel, **kwargs):
-        fig, ax = plt.subplots(figsize=(10, 10))
+        fig, ax = plt.subplots() #plt.subplots(figsize=(10, 10))
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
         for key in x:
@@ -483,12 +430,12 @@ def plot_rliable(log_readers_dict, baseline='random', **kwargs):
         plt.savefig(os.path.join(args.output_path, f"{filename}.{PLOT_FILE_FORMAT}"))
         plt.close(fig)
 
-    save_scatter_plot("MI_gengap_scatter", mutual_infos_u_stale, gen_gaps_no_norm, 'Mutual Information', 'GenGap')
-    save_scatter_plot("MI_normgengap_scatter", mutual_infos_u_stale, gen_gaps, 'Mutual Information', 'Normalised '
+    save_scatter_plot("MI_gengap_scatter", mutual_infos, gen_gaps_no_norm, '$\mathrm{I}(L;b)$', 'GenGap')
+    save_scatter_plot("MI_normgengap_scatter", mutual_infos, gen_gaps, '$\mathrm{I}(L;b)$', 'Normalised '
                                                                                                   'GenGap')
 
-    save_scatter_plot("MI_vl_scatter", mutual_infos_u_stale, vl, 'Mutual Information', '$\ell_1$ value loss')
-    save_scatter_plot("MI_normvl_scatter", mutual_infos_u_stale, norm_vl, 'Mutual Information', 'Normalised $\ell_1$ '
+    save_scatter_plot("MI_vl_scatter", mutual_infos, vl, '$\mathrm{I}(L;b)$', '$\ell_1$ value loss')
+    save_scatter_plot("MI_normvl_scatter", mutual_infos, norm_vl, '$\mathrm{I}(L;b)$', 'Normalised $\ell_1$ '
                                                                                                 'value loss')
 
     save_scatter_plot("vl_gengap_scatter", vl, gen_gaps_no_norm, '$\ell_1$ value loss', 'GenGap')
@@ -512,14 +459,16 @@ def plot_rliable(log_readers_dict, baseline='random', **kwargs):
         plt.savefig(os.path.join(args.output_path, f"{filename}.{PLOT_FILE_FORMAT}"))
         plt.close(fig)
 
-    save_score_intervals_plot("procgen_score_aggregates_mean_score_gaps", aggregate_scores_j, aggregate_score_cis_j,
-                                metric_names=['Mean Normalised Train Score',
-                                              'Mean Normalised Test Score',
-                                              'Mean Normalised GenGap'],
-                                algorithms=list(aggregate_scores_j.keys()),
+    algorithms = [lbl for lbl in METHOD_ORDER if lbl in agg_sc]
+    save_score_intervals_plot("procgen_aggregates_gengap_MI_train_test", agg_sc, agg_ci,
+                                metric_names=['$\mathrm{I}(L;b)$',
+                                              'Normalised GenGap',
+                                              'Normalised train score',
+                                              'Normalised test score'],
+                                algorithms=list(reversed(algorithms)),
                                 colors=colors,
                                 xlabel=f'',
-                                subfigure_width=4.0,
+                                subfigure_width=3.0,
                                 row_height=0.15,
                                 left=0.0,
                                 xlabel_y_coordinate=0.1)

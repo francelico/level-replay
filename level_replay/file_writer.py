@@ -607,10 +607,12 @@ class FileWriter:
         with open(self.paths["final_train_eval"], "r") as finaltrainfile:
             reader = csv.reader(finaltrainfile)
             lines = list(reader)
-        header = lines[0]
-        lines = lines[1:]
-        if lines:
-            self._final_train_eval_by_seed = np.array([[float(val) for val in row] for row in lines])
+        if len(lines) > 1:
+            header = lines[0]
+            lines = lines[1:]
+            self._final_train_eval_by_seed = np.array([[float(val) if val != '' else np.NaN for val in row] for row in lines])
+        else:
+            self._final_train_eval_by_seed = None
 
         with open(self.paths["final_test_eval"], "r") as finaltestfile:
             reader = csv.DictReader(finaltestfile)
@@ -668,10 +670,12 @@ class FileWriter:
 
     @property
     def final_train_eval_by_seed(self) -> np.ndarray:
-        return self._final_train_eval_by_seed
+        if self._final_train_eval_by_seed is None:
+            return None
+        return self._final_train_eval_by_seed[-1]
 
     @property
-    def final_test_eval(self) -> List[Dict[str, Any]]:
+    def final_test_eval(self) -> Dict[str, Any]:
         return self._final_test_eval
 
     @property
