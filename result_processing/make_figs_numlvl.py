@@ -111,6 +111,11 @@ def parse_args():
         type=int,
         default=100,
         help='rolling window for smoother plots.')
+    parser.add_argument(
+        '--histogram_metrics',
+        type=str,
+        default='run_average_shift_gap_pids,final_shift_gap_pids,final_gen_gap_pids,final_test_eval_scores,final_train_eval_scores,delta_train_eval_scores',
+    )
 
     return parser.parse_args()
 
@@ -182,9 +187,10 @@ def adjust_legend(fig, ax, ncol=3, fontsize=20):
                fontsize=fontsize
                )
 
-def separate_legend(ax, ncol=3):
-    fig = plt.figure("Legend only", figsize=(6, 0.5))
-    handles, labels = ax.get_legend_handles_labels()
+def separate_legend(ax_o, ncol=3):
+    fig, ax = plt.subplots()
+    fig.set_size_inches(ncol*2, 0.5)
+    handles, labels = ax_o.get_legend_handles_labels()
     labels, handles = dedupe_legend_labels_and_handles(labels, handles)
     fig.legend(handles, labels,
                ncol=ncol,
@@ -194,21 +200,16 @@ def separate_legend(ax, ncol=3):
                frameon=False,
                # fontsize=fontsize
                )
-    # fig.tight_layout()
+    ax.spines[['right', 'top','bottom', 'left']].set_visible(False)
+    ax.set_xticks([])
+    ax.set_yticks([])
     return fig
 
-def plot_numlvl_histograms(log_readers, metrics, save_to, **kwargs):
-    #TODO: call function properly instead of mimicing inputs below
+def plot_numlvl_histograms(log_readers, metrics, **kwargs):
     kwargs = {}
     kwargs['method_plot_args'] = PLOTTING
     kwargs['plot_args'] = {'legend_order': list(LEVELSET_SIZES.values())}
-    metrics = ['run_average_shift_gap_pids',
-               'final_shift_gap_pids',
-               'final_gen_gap_pids',
-               'final_test_eval_scores',
-               'final_train_eval_scores',
-               'delta_train_eval_scores']
-    save_to = '/home/francelico/dev/PhD/procgen/results/test_figs'
+    save_to = args.output_path
 
     mean_train_scores_random = {}
     for logr_array in log_readers.values():
@@ -244,6 +245,7 @@ def plot_numlvl_histograms(log_readers, metrics, save_to, **kwargs):
     plot_args = kwargs.get('plot_args', {})
     sns_args = {
         'hue_order': plot_args.get('legend_order', None),
+        'alpha': 0.75,
     }
 
     fig, ax = plt.subplots()
@@ -317,6 +319,8 @@ if __name__ == '__main__':
     for run_id in log_readers:
         st = compute_stats(log_readers[run_id])
         stats[run_id] = DotDict(st)
+
+    plot_numlvl_histograms(log_readers, args.histogram_metrics.split(','))
 
     # Careful, no checks to verify number of seeds is the same across runs
     print("Done")

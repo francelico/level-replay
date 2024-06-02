@@ -6,6 +6,7 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import numpy as np
+import pandas as pd
 import seaborn as sns
 from torchvision import utils as vutils
 import sys
@@ -17,6 +18,7 @@ from util import *
 from result_processing.util import dedupe_legend_labels_and_handles
 import result_processing.file_reader as reader
 from level_replay.utils import DotDict
+from result_processing.make_figs_numlvl import separate_legend
 
 
 sns.set_theme(style="whitegrid",
@@ -53,7 +55,7 @@ PLOTTING = {
     's1-value_l1_s2-instance_pred_log_prob_bf-0.25_l2-0.1_fs-0.5_fe-1.0': {'label': '$S=S^V, S^\prime=S^{\mathrm{MI}}$'},
     }
 # Set plotting colors from a seaborn palette.
-plotting_color_palette = sns.color_palette('colorblind', n_colors=len(PLOTTING))
+plotting_color_palette = list(reversed(sns.color_palette('colorblind', n_colors=len(PLOTTING))))
 PLOTTING = {
     method: {'color': plotting_color_palette[i], **kwargs}
     for i, (method, kwargs) in enumerate(PLOTTING.items())
@@ -83,6 +85,14 @@ def parse_args():
         '--plot_rliable',
         action="store_true",
         help='Plot aggregate plots.')
+    parser.add_argument(
+        '--plot_train_eval_curves',
+        action="store_true",
+        help='Plot training and evaluation curves per environment and across all environments.')
+    parser.add_argument(
+        '--save_result_tables',
+        action="store_true",
+        help='Save result tables in tex format.')
     parser.add_argument(
         '--x_axis',
         type=str,
@@ -174,15 +184,13 @@ def update_baseline_scores(BASELINE_SCORES, logreaders, baseline='random'):
         if baseline == 'random':
             BASELINE_SCORES[logr.env_name]['random_train_set'] = (logr.final_train_eval_mean, logr.final_train_eval_std)
 
-def mean_normalised_scores(log_readers, baseline='random', mode='test'):
+def mean_normalised_scores(log_readers, baseline='random', mode='test', error='std'):
 
-    mean_scores = []
-    std_scores = []
+    all_scores = []
     for logr in log_readers:
         if mode == 'test':
             logr.normalised_scores = logr.final_test_eval_scores / BASELINE_SCORES[logr.env_name][baseline][0]
-            mean_scores.append(logr.final_test_eval_mean / BASELINE_SCORES[logr.env_name][baseline][0])
-            std_scores.append(logr.final_test_eval_std / BASELINE_SCORES[logr.env_name][baseline][0])
+            all_scores.append(logr.normalised_scores)
         elif mode == 'train':
             update = logr.num_updates
             all_updates = logr.logs['total_student_grad_updates'].to_numpy()
@@ -191,18 +199,14 @@ def mean_normalised_scores(log_readers, baseline='random', mode='test'):
             logr.normalised_scores_train = scores / BASELINE_SCORES[logr.env_name][baseline][0]
             logr.train_set_normalised_scores_train = \
                 scores / BASELINE_SCORES[logr.env_name][f'{baseline}_train_set'][0]
-            mean_scores.append(scores.mean() / BASELINE_SCORES[logr.env_name][baseline][0])
-            std_scores.append(scores.std() / BASELINE_SCORES[logr.env_name][baseline][0])
-            value_l1 = logr.logs['level_value_loss_mavg'][ids].to_numpy()#TODO: change to
+            all_scores.append(logr.normalised_scores_train)
+            value_l1 = logr.logs['level_value_loss_mavg'][ids].to_numpy()
             logr.value_l1 = value_l1
-            # final_train_eval:final_train_eval_value_loss when available for more accuracy
             logr.normalised_value_l1 = value_l1 / scores.mean()
-    mean_scores = np.array(mean_scores)
-    std_scores = np.array(std_scores)
-    std = 1/len(std_scores) * np.sqrt((std_scores**2).sum())
-    return mean_scores.mean(), std
+    all_scores = np.stack(all_scores).mean(axis=0) # aggregated across environments
+    return all_scores
 
-def compute_stats(log_readers, stat_keys=None, update=-1, **kwargs):
+def compute_stats(log_readers, stat_keys=None, update=-1, per_env=True, **kwargs):
 
     if stat_keys is None:
         stat_keys = ['instance_pred_accuracy_train', 'instance_pred_prob_train', 'instance_pred_entropy_train',
@@ -217,7 +221,7 @@ def compute_stats(log_readers, stat_keys=None, update=-1, **kwargs):
         assert all([logr.num_updates == update for logr in log_readers])
     stats = {}
     for stat in stat_keys:
-        mean_stats = []
+        all_stats = []
         if kwargs.get('mavg', False):
             stat_lookup = f"{stat}_mavg"
         else:
@@ -230,9 +234,15 @@ def compute_stats(log_readers, stat_keys=None, update=-1, **kwargs):
                 if not hasattr(logr, 'final_stats'):
                     logr.final_stats = DotDict({})
                 logr.final_stats[stat] = extracted_stats
-            mean_stats.append(extracted_stats.mean())
-        mean_stats = np.array(mean_stats)
-        stats[stat] = (mean_stats.mean(), mean_stats.std())
+            if per_env:
+                stats[f'{stat}:{logr.env_name}'] = extracted_stats
+                if f'final_train_eval_scores:{logr.env_name}' not in stats:
+                    stats[f'final_train_eval_scores:{logr.env_name}'] = logr.final_train_eval_scores
+                if f'final_test_eval_scores:{logr.env_name}' not in stats:
+                    stats[f'final_test_eval_scores:{logr.env_name}'] = logr.final_test_eval_scores
+            all_stats.append(extracted_stats)
+        all_stats = np.stack(all_stats).mean(axis=0)
+        stats[stat] = all_stats #(all_stats.mean(), all_stats.std())
     return stats
 
 def plot_rliable(log_readers_dict, baseline='random', **kwargs):
@@ -493,6 +503,175 @@ def plot_rliable(log_readers_dict, baseline='random', **kwargs):
     save_probablity_of_improvement_plot("procgen_prob_of_improvement_gap", average_probabilities_gap, average_prob_cis_gap,
                                         xlabel='P(X $>$ Y), Normalised Generalisation Gap')
 
+def plot_per_env_curves(log_readers, metric, filename, make_legend_fig=False):
+
+    def ax_formator(ax):
+        # ax.grid(True, which='major', linewidth=0.5, color='black', alpha=0.5)
+        ax.grid(False)
+        ax.spines[['right', 'top','bottom', 'left']].set_color('black')
+        ax.tick_params(bottom=True, left=True, )
+        ax.xaxis.set_major_locator(plt.MaxNLocator(2))
+        ax.set_xlim(0, 25)
+        ax.yaxis.set_major_locator(plt.MaxNLocator(3))
+        for item in ([ax.title, ax.xaxis.label, ax.yaxis.label] +
+                     ax.get_xticklabels() + ax.get_yticklabels()):
+            item.set_fontsize(20)
+
+    fig, axes = plt.subplots(4,4)
+    fig.set_size_inches(20, 20)
+    for xpid, label in LABELS.items():
+        if xpid not in log_readers:
+            print(f"Warning: missing data for {xpid}")
+            continue
+        for logr in log_readers[xpid]:
+            env_name = logr.env_name
+            logs = logr.logs
+            logs['stepM'] = logs['step'] / 1e6
+            env_idx = ENV_NAMES.index(env_name)
+            ax = axes.flatten()[env_idx]
+            ax.set_title(env_name.capitalize())
+            sns.lineplot(x='stepM', y=metric, data=logs, ax=ax, errorbar='se', estimator='mean', alpha=0.75, **PLOTTING[xpid])
+            ax.set(xlabel='', ylabel='')
+
+    legend_fig = None
+    for ax in axes.flatten():
+        ax_formator(ax)
+        if legend_fig is None and make_legend_fig:
+            legend_fig = separate_legend(ax, ncol=len(log_readers))
+            legend_fig.savefig(os.path.join(args.output_path, f"{filename}_legend.{PLOT_FILE_FORMAT}"))
+        ax.legend_ = None
+    for ax_v in axes[:, 0]:
+        ax_v.set_ylabel('Score')
+    for ax_h in axes[-1, :]:
+        ax_h.set_xlabel('Step [1e6]')
+    fig.tight_layout()
+    fig.savefig(os.path.join(args.output_path, f"{filename}.{PLOT_FILE_FORMAT}"))
+
+def plot_all_env_curves(log_readers, metric, filename, baseline='random', ylabel='Score', make_legend_fig=False):
+
+    def ax_formator(ax):
+        # ax.grid(True, which='major', linewidth=0.5, color='black', alpha=0.5)
+        ax.grid(False)
+        ax.spines[['right', 'top']].set_visible(False)
+        ax.spines[['bottom', 'left']].set_color('black')
+        ax.tick_params(bottom=True, left=True, )
+        ax.xaxis.set_major_locator(plt.MaxNLocator(2))
+        ax.set_xlim(0, 25)
+        ax.yaxis.set_major_locator(plt.MaxNLocator(4))
+        for item in ([ax.title, ax.xaxis.label, ax.yaxis.label] +
+                     ax.get_xticklabels() + ax.get_yticklabels()):
+            item.set_fontsize(20)
+
+    fig, ax = plt.subplots()
+    fig.set_size_inches(10, 16)
+    for xpid, label in LABELS.items():
+        if xpid not in log_readers:
+            print(f"Warning: missing data for {xpid}")
+            continue
+        dfs = []
+        for logr in log_readers[xpid]:
+            env_name = logr.env_name
+            dfs.append(pd.DataFrame({'stepM': logr.logs['step'] / 1e6,
+                                     metric: logr.logs[metric] / BASELINE_SCORES[env_name][baseline][0]}))
+        logs = pd.concat(dfs).reset_index(drop=True)
+        sns.lineplot(x='stepM', y=metric, data=logs, ax=ax, errorbar='se', estimator='mean', alpha=0.75, **PLOTTING[xpid])
+    ax.set(xlabel='Step [1e6]', ylabel=ylabel)
+    ax_formator(ax)
+    ax.legend()
+    if make_legend_fig:
+        legend_fig = separate_legend(ax, ncol=len(log_readers))
+        legend_fig.savefig(os.path.join(args.output_path, f"{filename}_legend.{PLOT_FILE_FORMAT}"))
+    ax.legend_ = None
+    fig.tight_layout()
+    fig.savefig(os.path.join(args.output_path, f"{filename}.{PLOT_FILE_FORMAT}"))
+
+def make_result_table_latex(stats, filename, quantity='final_test_eval_scores', rescale_f=1.0, agg_quantity=None,
+                            agg_quantity_label=None, rescale_f_agg=1.0, decimals=1, bold_best=None, bold_p=0.05):
+    """This function creates a pandas dataframe and uses the pandas.DataFrame.to_latex method to write a latex
+    table to the output filename.
+    The table columns are arranged as [env_name, *method_labels]
+    The first 16 rows are the mean score and standard deviation for each procgen game. The last row contains the mean and standard deviation of the normalised final scores across all games.
+    Scores are formatted as f{mean_score} \pm f{std_score}
+    contains the different  contains the mean and standard deviation of the final non-normalised scores for each environment
+    """
+
+    if bold_best == 'max':
+        best_fn = lambda x: max(x, key=x.get)
+    elif bold_best == 'min':
+        best_fn = lambda x: min(x, key=x.get)
+    else:
+        best_fn = None
+
+    def get_bold_wrap_fn(scores, bold_p, best_fn=None):
+        avg_scores = {label: scores.mean() for label, scores in row_scores.items()}
+        best_label = best_fn(avg_scores)
+        bold = {}
+        for label in scores:
+            if label == best_label:
+                bold[label] = True
+            else:
+                bold[label] = welch_test(row_scores[best_label], row_scores[label])[1] > bold_p
+        if all([b for b in bold.values()]):
+            bold = {label: False for label in scores}
+        bold_fns = {}
+        for label in scores:
+            if bold[label]:
+                bold_fns[label] = lambda x: f"\\textbf{{{x}}}"
+            else:
+                bold_fns[label] = lambda x: x
+        return bold_fns
+
+    save_to = os.path.join(args.output_path, filename)
+    label2method = {lab: met for met, lab in LABELS.items()}
+    cols = ['Environment'] + METHOD_ORDER
+    df = pd.DataFrame(columns=cols)
+    for env_name in ENV_NAMES:
+        row = [env_name.capitalize()]
+        row_scores = {}
+        for label in METHOD_ORDER:
+            method_id = label2method[label]
+            if method_id in stats:
+                scores = stats[method_id][f'{quantity}:{env_name}']
+                row_scores[label] = scores
+        if best_fn is not None:
+            bold_fns = get_bold_wrap_fn(row_scores, bold_p, best_fn)
+        else:
+            bold_fns = {label: lambda x: x for label in row_scores}
+        for label in METHOD_ORDER:
+            if label in row_scores:
+                scores = row_scores[label]
+                table_entry = f"{scores.mean()*rescale_f:.{decimals}f} $\pm$ {scores.std()*rescale_f:.{decimals}f}"
+                row.append(bold_fns[label](table_entry))
+            else:
+                row.append('N/A')
+        df.loc[len(df)] = row
+    if agg_quantity is not None:
+        row = [agg_quantity_label]
+        row_scores = {}
+        for label in METHOD_ORDER:
+            method_id = label2method[label]
+            if method_id in stats:
+                scores = stats[method_id][agg_quantity]
+                row_scores[label] = scores
+        if best_fn is not None:
+            bold_fns = get_bold_wrap_fn(row_scores, bold_p, best_fn)
+        else:
+            bold_fns = {label: lambda x: x for label in row_scores}
+        for label in METHOD_ORDER:
+            if label in row_scores:
+                scores = row_scores[label]
+                table_entry = f"{scores.mean() * rescale_f_agg:.{decimals}f} $\pm$ {scores.std() * rescale_f_agg:.{decimals}f}"
+                row.append(bold_fns[label](table_entry))
+            else:
+                row.append('N/A')
+        df.loc[len(df)] = row
+
+    table = df.to_latex(index=False, escape=False)
+    # table = df.style.to_latex(index=False, escape=False)
+    with open(save_to, "w") as f:
+        f.write(table)
+    return table
+
 if __name__ == '__main__':
 
     logger = logging.getLogger(__name__)
@@ -532,7 +711,30 @@ if __name__ == '__main__':
         st.update(compute_stats(log_readers[run_id]))
         stats[run_id] = DotDict(st)
 
-    plot_rliable(log_readers)
+    if args.save_result_tables:
+        make_result_table_latex(stats, 'test_result_table.tex', quantity='final_test_eval_scores', rescale_f=1.0,
+                                agg_quantity='normalised_score', agg_quantity_label='Normalised Test Scores (\%)',
+                                rescale_f_agg=100, decimals=1, bold_best='max')
+        make_result_table_latex(stats, 'train_result_table.tex', quantity='final_train_eval_scores', rescale_f=1.0,
+                                agg_quantity='normalised_score_train', agg_quantity_label='Normalised Train Scores (\%)',
+                                rescale_f_agg=100, decimals=1, bold_best='max')
+        make_result_table_latex(stats, 'mutual_information_table.tex', quantity='mutual_information', rescale_f=1.0,
+                                agg_quantity='mutual_information', agg_quantity_label='Average Mutual Information',
+                                rescale_f_agg=1.0, decimals=2, bold_best='min')
+        make_result_table_latex(stats, 'classifier_accuracy_table.tex', quantity='instance_pred_accuracy', rescale_f=100.0,
+                                agg_quantity='instance_pred_accuracy', agg_quantity_label='Average Classifier Accuracy',
+                                rescale_f_agg=100.0, decimals=1, bold_best='min')
+
+    if args.plot_train_eval_curves:
+        plot_all_env_curves(log_readers, 'train_eval:mean_episode_return_mavg', 'trainset_curves_all_env', baseline='random', ylabel='Train Score', make_legend_fig=True)
+        plot_all_env_curves(log_readers, 'test:mean_episode_return_mavg', 'testset_curves_all_env', baseline='random', ylabel='Test Score', make_legend_fig=False)
+        plot_all_env_curves(log_readers, 'generalisation_gap_mavg', 'gengap_curves_all_env', baseline='random', ylabel='Generalisation Gap', make_legend_fig=False)
+
+        #/ metric = train_eval:mean_episode_return_mavg, test:mean_episode_return_mavg
+        plot_per_env_curves(log_readers, 'train_eval:mean_episode_return_mavg', 'trainset_curves_per_env', make_legend_fig=True)
+        plot_per_env_curves(log_readers, 'test:mean_episode_return_mavg', 'testset_curves_per_env', make_legend_fig=False)
+
+    # plot_rliable(log_readers)
 
     # Careful, no checks to verify number of seeds is the same across runs
     print("Done")

@@ -83,8 +83,8 @@ class LogReader:
             self._logger.warning(f"Num updare mismatch: {logs['# _tick'][-1]} != {self.num_updates} "
                                  f" in {filewriter.basepath}")
             if np.abs(self.num_updates - (logs['# _tick'][-1] + 1)) > 1:
-                raise ValueError(f"Number of update mismatch in {filewriter.basepath} in too high "
-                                 f"({np.abs(self.num_updates - logs['# _tick'][-1]) + 1})")
+                raise ValueError(f"Log mismatch in {filewriter.basepath} is too large to fix: "
+                                 f"({np.abs(self.num_updates - logs['# _tick'][-1]) + 1} tick mismatch)")
             else:
                 for key in logs.keys():
                     new_array = np.zeros(self.num_updates).astype(logs[key].dtype)
@@ -245,6 +245,12 @@ class LogReader:
     @property
     def train_eval_median_return(self)->pd.DataFrame:
         return pd.DataFrame([fw.logs['train_eval:median_episode_return'] for fw in self.pid_filewriters]).T
+
+    @property
+    def global_step(self)->np.ndarray:
+        step_per_tick = self.args.num_env_steps // self.args.num_processes // self.args.num_steps
+        num_ticks = len(self.train_mean_return)
+        return np.arange(1, num_ticks + 1) * step_per_tick
 
     @property
     def instance_predictor_hidden_size(self)->int:
