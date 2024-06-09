@@ -8,7 +8,6 @@ import matplotlib as mpl
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from torchvision import utils as vutils
 import sys
 import re
 from rliable import metrics, plot_utils
@@ -68,18 +67,14 @@ LABELS = {method : d['label'] for method, d in PLOTTING.items()}
 def parse_args():
     parser = argparse.ArgumentParser(description='Fig')
     parser.add_argument(
-        '--debug',
-        action="store_true",
-        help='Debug mode.')
-    parser.add_argument(
         '--base_path',
         type=str,
-        default='/home/francelico/dev/PhD/procgen/results/results',
+        default=None,
         help='Base path to experiment results directories.')
     parser.add_argument(
         '--output_path',
         type=str,
-        default='/home/francelico/dev/PhD/procgen/results/figs',
+        default=None,
         help='Base path to store figures and other outputs.')
     parser.add_argument(
         '--plot_rliable',
@@ -93,11 +88,6 @@ def parse_args():
         '--save_result_tables',
         action="store_true",
         help='Save result tables in tex format.')
-    parser.add_argument(
-        '--x_axis',
-        type=str,
-        default='num_updates',
-        help='X axis for plots.')
     parser.add_argument(
         '--ignore_runs',
         type=str,
@@ -116,7 +106,7 @@ def parse_args():
         '--rolling_window',
         type=int,
         default=100,
-        help='seeds to pick in each directory.')
+        help='Number of points to use for smoothing.')
 
     return parser.parse_args()
 
@@ -159,24 +149,7 @@ def plot_aggregates(run_experiment, env_families, checkpoints, save_to, normalis
             plt.savefig(os.path.join(new_dir, f"{key}_{metric}{n}.{PLOT_FILE_FORMAT}"))
             plt.close(fig)
 
-BASELINE_SCORES = {
-    'bigfish': {'random': (3.7, 1.2), 'plr': (10.9, 2.8)},
-    'bossfight': {'random': (7.7, 0.4), 'plr': (8.9, 0.4)},
-    'caveflyer': {'random': (5.4, 0.8), 'plr': (6.3, 0.5)},
-    'chaser': {'random': (5.2, 0.7), 'plr': (6.9, 1.2)},
-    'climber': {'random': (5.9, 0.6), 'plr': (6.3, 0.8)},
-    'coinrun': {'random': (8.6, 0.4), 'plr': (8.8, 0.5)},
-    'dodgeball': {'random': (1.7, 0.2), 'plr': (1.8, 0.5)},
-    'fruitbot': {'random': (27.3, 0.9), 'plr': (28.0, 1.3)},
-    'heist': {'random': (2.8, 0.9), 'plr': (2.9, 0.5)},
-    'jumper': {'random': (5.7, 0.4), 'plr': (5.8, 0.5)},
-    'leaper': {'random': (4.2, 1.3), 'plr': (6.8, 1.2)},
-    'maze': {'random': (5.5, 0.4), 'plr': (5.5, 0.8)},
-    'miner': {'random': (8.7, 0.7), 'plr': (9.6, 0.6)},
-    'ninja': {'random': (6.0, 0.4), 'plr': (7.2, 0.4)},
-    'plunder': {'random': (5.1, 0.6), 'plr': (8.7, 2.2)},
-    'starpilot': {'random': (26.8, 1.5), 'plr': (27.9, 4.4)},
-}
+BASELINE_SCORES = defaultdict(dict)
 
 def update_baseline_scores(BASELINE_SCORES, logreaders, baseline='random'):
     for logr in logreaders:
@@ -402,11 +375,11 @@ def plot_rliable(log_readers_dict, baseline='random', **kwargs):
     aggregate_mutual_infos, aggregate_mutual_infos_cis = rly.get_interval_estimates(mutual_infos, aggregate_func, reps=50000)
     aggregate_gaps, aggregate_gaps_cis = rly.get_interval_estimates(
         gen_gaps, aggregate_func, reps=50000)
-    aggregate_train_scores_norm_by_train, aggregate_train_score_norm_by_train_cis = rly.get_interval_estimates(
-        train_scores_norm_by_train, aggregate_func, reps=50000)
+    aggregate_train_scores_norm_by_test, aggregate_train_score_norm_by_test_cis = rly.get_interval_estimates(
+        train_scores_norm_by_test, aggregate_func, reps=50000)
 
     agg_sc, agg_ci = join_agg(aggregate_mutual_infos, aggregate_mutual_infos_cis, aggregate_gaps, aggregate_gaps_cis)
-    agg_sc, agg_ci = join_agg(agg_sc, agg_ci, aggregate_train_scores_norm_by_train, aggregate_train_score_norm_by_train_cis)
+    agg_sc, agg_ci = join_agg(agg_sc, agg_ci, aggregate_train_scores_norm_by_test, aggregate_train_score_norm_by_test_cis)
     agg_sc, agg_ci = join_agg(agg_sc, agg_ci, aggregate_test_scores_norm_by_test, aggregate_test_scores_norm_by_test_cis)
 
     pairs = [
@@ -734,7 +707,8 @@ if __name__ == '__main__':
         plot_per_env_curves(log_readers, 'train_eval:mean_episode_return_mavg', 'trainset_curves_per_env', make_legend_fig=True)
         plot_per_env_curves(log_readers, 'test:mean_episode_return_mavg', 'testset_curves_per_env', make_legend_fig=False)
 
-    # plot_rliable(log_readers)
+    if args.plot_rliable:
+        plot_rliable(log_readers)
 
     # Careful, no checks to verify number of seeds is the same across runs
     print("Done")
