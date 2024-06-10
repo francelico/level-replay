@@ -16,8 +16,8 @@ from rliable import metrics, plot_utils
 from rliable import library as rly
 from util import *
 
-from result_processing.util import dedupe_legend_labels_and_handles
-import result_processing.file_reader as reader
+from plot.util import dedupe_legend_labels_and_handles
+import plot.file_reader as reader
 from level_replay.utils import DotDict
 
 
