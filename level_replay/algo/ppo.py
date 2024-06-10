@@ -8,6 +8,8 @@
 #
 # This file is a modified version of:
 # https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail/blob/master/a2c_ppo_acktr/algo/ppo.py
+#
+# Instance predictor implementation by Samuel Garcin.
 
 import torch
 import torch.nn as nn

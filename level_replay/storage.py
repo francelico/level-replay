@@ -8,6 +8,8 @@
 #
 # This file is a modified version of:
 # https://github.com/rraileanu/auto-drac/blob/master/ucb_rl2_meta/model.py
+#
+# Instance predictor implementation by Samuel Garcin.
 
 import torch
 from torch.utils.data.sampler import \

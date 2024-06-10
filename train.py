@@ -3,6 +3,8 @@
 #
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
+#
+# Implementation for mixed sampling strategies and instance prediction by Samuel Garcin.
 
 import copy
 import os

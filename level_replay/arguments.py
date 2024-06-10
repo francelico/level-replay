@@ -8,6 +8,8 @@
 #
 # This file is a modified version of:
 # https://github.com/rraileanu/auto-drac/blob/master/ucb_rl2_meta/arguments.py
+#
+# Implementation for mixed sampling strategies and instance prediction by Samuel Garcin.
 
 import argparse
 

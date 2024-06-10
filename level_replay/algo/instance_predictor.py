@@ -1,3 +1,11 @@
+# Copyright (c) 2022-2024 Samuel Garcin
+#
+# Licensed under the MIT License;
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://opensource.org/licenses/MIT
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
